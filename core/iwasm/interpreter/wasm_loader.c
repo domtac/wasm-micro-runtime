@@ -4,6 +4,7 @@
  */
 
 #include "wasm_loader.h"
+#include "bh_log.h"
 #include "bh_platform.h"
 #include "wasm.h"
 #include "wasm_opcode.h"
@@ -3045,6 +3046,7 @@ load_memory_import(const uint8 **p_buf, const uint8 *buf_end,
     bool is_memory64 = false;
     uint32 declare_init_page_count = 0;
     uint32 declare_max_page_count = 0;
+    uint32 num_bytes_per_page = DEFAULT_NUM_BYTES_PER_PAGE;
 #if WASM_ENABLE_MULTI_MODULE != 0
     WASMModule *sub_module = NULL;
     WASMMemory *linked_memory = NULL;
@@ -3086,6 +3088,13 @@ load_memory_import(const uint8 **p_buf, const uint8 *buf_end,
     else {
         /* Limit the maximum memory size to max_page_count */
         declare_max_page_count = max_page_count;
+    }
+
+    if (mem_flag & CUSTOM_PAGE_SIZE_FLAG){
+        LOG_VERBOSE("Detected custom page size. Setting to 1");
+        num_bytes_per_page = 1;
+        p++; // increment one, there is an axtra byte add the end of import section
+        // TODO why?
     }
 
 #if WASM_ENABLE_MULTI_MODULE != 0
@@ -3159,7 +3168,7 @@ load_memory_import(const uint8 **p_buf, const uint8 *buf_end,
     memory->mem_type.flags = mem_flag;
     memory->mem_type.init_page_count = declare_init_page_count;
     memory->mem_type.max_page_count = declare_max_page_count;
-    memory->mem_type.num_bytes_per_page = DEFAULT_NUM_BYTES_PER_PAGE;
+    memory->mem_type.num_bytes_per_page = num_bytes_per_page;
 
     *p_buf = p;
 
