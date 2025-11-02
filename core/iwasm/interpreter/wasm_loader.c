@@ -3093,8 +3093,10 @@ load_memory_import(const uint8 **p_buf, const uint8 *buf_end,
     if (mem_flag & CUSTOM_PAGE_SIZE_FLAG){
         LOG_VERBOSE("Detected custom page size. Setting to 1");
         num_bytes_per_page = 1;
-        p++; // increment one, there is an axtra byte add the end of import section
-        // TODO why?
+        // there is an axtra byte at the end of import section for future extension
+        // ignore it for now
+        p++; 
+       
     }
 
 #if WASM_ENABLE_MULTI_MODULE != 0
@@ -3474,6 +3476,7 @@ load_memory(const uint8 **p_buf, const uint8 *buf_end, WASMMemory *memory,
     uint32 max_page_count;
 #endif
     bool is_memory64 = false;
+    uint32 num_bytes_per_page = DEFAULT_NUM_BYTES_PER_PAGE;
 
     p_org = p;
     read_leb_uint32(p, p_end, memory->flags);
@@ -3511,7 +3514,13 @@ load_memory(const uint8 **p_buf, const uint8 *buf_end, WASMMemory *memory,
         memory->max_page_count = max_page_count;
     }
 
-    memory->num_bytes_per_page = DEFAULT_NUM_BYTES_PER_PAGE;
+    if (memory->flags & CUSTOM_PAGE_SIZE_FLAG) {
+        // ignore extra byte at end
+        p++;
+        num_bytes_per_page = 1;
+    }
+
+    memory->num_bytes_per_page = num_bytes_per_page;
 
     *p_buf = p;
     return true;
