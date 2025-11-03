@@ -309,8 +309,10 @@ memory_instantiate(WASMModuleInstance *module_inst, WASMModuleInstance *parent,
         memory->is_memory64 = 1;
     }
 #endif
+    uint32 custom_pages_multiplier = DEFAULT_NUM_BYTES_PER_PAGE / memory->num_bytes_per_page;
     default_max_page =
         memory->is_memory64 ? DEFAULT_MEM64_MAX_PAGES : DEFAULT_MAX_PAGES;
+    default_max_page *= custom_pages_multiplier;
 
     /* The app heap should be in the default memory */
     if (memory_idx == 0) {

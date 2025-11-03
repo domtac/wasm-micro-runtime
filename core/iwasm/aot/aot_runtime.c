@@ -1003,14 +1003,16 @@ memory_instantiate(AOTModuleInstance *module_inst, AOTModuleInstance *parent,
     }
 #endif
 
+uint32 custom_pages_multiplier = DEFAULT_NUM_BYTES_PER_PAGE / num_bytes_per_page;
+
 #if WASM_ENABLE_MEMORY64 != 0
     if (is_memory64) {
-        default_max_pages = DEFAULT_MEM64_MAX_PAGES;
+        default_max_pages = DEFAULT_MEM64_MAX_PAGES * custom_pages_multiplier;
     }
     else
 #endif
     {
-        default_max_pages = DEFAULT_MAX_PAGES;
+        default_max_pages = DEFAULT_MAX_PAGES * custom_pages_multiplier;
     }
 
     if (heap_size > 0 && module->malloc_func_index != (uint32)-1
