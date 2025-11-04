@@ -155,18 +155,19 @@ check_buf1(const uint8 *buf, const uint8 *buf_end, uint32 length,
 #define read_uint8(p) TEMPLATE_READ_VALUE(uint8, p)
 #define read_uint32(p) TEMPLATE_READ_VALUE(uint32, p)
 
-#define CALCULATE_DEFAULT_MAX_SIZE(is_memory64, num_bytes_per_page)      \
-    ({                                                                   \
-        uint32 _custom_page_multiplier =                                 \
-            (DEFAULT_NUM_BYTES_PER_PAGE / (num_bytes_per_page));         \
-        uint32 _default_max_size =                                       \
-            (is_memory64) ? DEFAULT_MEM64_MAX_PAGES : DEFAULT_MAX_PAGES; \
-        _default_max_size *= _custom_page_multiplier;                    \
-        if (_default_max_size == 0) {                                    \
-            _default_max_size = UINT32_MAX;                              \
-        }                                                                \
-        _default_max_size;                                               \
-    })
+static inline uint32
+calculate_default_max_size(bool is_memory64, uint32 num_bytes_per_page)
+{
+    uint32 custom_page_multiplier =
+        DEFAULT_NUM_BYTES_PER_PAGE / num_bytes_per_page;
+    uint32 default_max_size =
+        is_memory64 ? DEFAULT_MEM64_MAX_PAGES : DEFAULT_MAX_PAGES;
+    default_max_size *= custom_page_multiplier;
+    if (default_max_size == 0) {
+        default_max_size = UINT32_MAX;
+    }
+    return default_max_size;
+}
 
 #define read_leb_int64(p, p_end, res)                                   \
     do {                                                                \
@@ -2993,7 +2994,7 @@ check_memory_init_size(bool is_memory64, uint32 init_size,
                        uint32 error_buf_size)
 {
     uint32 default_max_size =
-        CALCULATE_DEFAULT_MAX_SIZE(is_memory64, num_bytes_per_page);
+        calculate_default_max_size(is_memory64, num_bytes_per_page);
 
     if (!is_memory64 && init_size > default_max_size) {
         set_error_buf(error_buf, error_buf_size,
@@ -3017,7 +3018,7 @@ check_memory_max_size(bool is_memory64, uint32 init_size,
                       char *error_buf, uint32 error_buf_size)
 {
     uint32 default_max_size =
-        CALCULATE_DEFAULT_MAX_SIZE(is_memory64, num_bytes_per_page);
+        calculate_default_max_size(is_memory64, num_bytes_per_page);
 
     if (max_size < init_size) {
         set_error_buf(error_buf, error_buf_size,
