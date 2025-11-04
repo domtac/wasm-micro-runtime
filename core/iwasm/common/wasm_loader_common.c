@@ -76,7 +76,8 @@ wasm_memory_check_flags(const uint8 mem_flag, char *error_buf,
 #endif
     }
 
-    if (mem_flag > MAX_PAGE_COUNT_FLAG + SHARED_MEMORY_FLAG + MEMORY64_FLAG + CUSTOM_PAGE_SIZE_FLAG) {
+    if (mem_flag > MAX_PAGE_COUNT_FLAG + SHARED_MEMORY_FLAG + MEMORY64_FLAG
+                       + CUSTOM_PAGE_SIZE_FLAG) {
         wasm_loader_set_error_buf(error_buf, error_buf_size,
                                   "invalid limits flags", is_aot);
         return false;

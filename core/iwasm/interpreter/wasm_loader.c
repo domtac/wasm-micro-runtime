@@ -155,15 +155,17 @@ check_buf1(const uint8 *buf, const uint8 *buf_end, uint32 length,
 #define read_uint8(p) TEMPLATE_READ_VALUE(uint8, p)
 #define read_uint32(p) TEMPLATE_READ_VALUE(uint32, p)
 
-#define CALCULATE_DEFAULT_MAX_SIZE(is_memory64, num_bytes_per_page) \
-    ({ \
-        uint32 _custom_page_multiplier = (DEFAULT_NUM_BYTES_PER_PAGE / (num_bytes_per_page)); \
-        uint32 _default_max_size = (is_memory64) ? DEFAULT_MEM64_MAX_PAGES : DEFAULT_MAX_PAGES; \
-        _default_max_size *= _custom_page_multiplier; \
-        if (_default_max_size == 0) { \
-            _default_max_size = UINT32_MAX; \
-        } \
-        _default_max_size; \
+#define CALCULATE_DEFAULT_MAX_SIZE(is_memory64, num_bytes_per_page)      \
+    ({                                                                   \
+        uint32 _custom_page_multiplier =                                 \
+            (DEFAULT_NUM_BYTES_PER_PAGE / (num_bytes_per_page));         \
+        uint32 _default_max_size =                                       \
+            (is_memory64) ? DEFAULT_MEM64_MAX_PAGES : DEFAULT_MAX_PAGES; \
+        _default_max_size *= _custom_page_multiplier;                    \
+        if (_default_max_size == 0) {                                    \
+            _default_max_size = UINT32_MAX;                              \
+        }                                                                \
+        _default_max_size;                                               \
     })
 
 #define read_leb_int64(p, p_end, res)                                   \
@@ -2986,10 +2988,12 @@ fail:
 }
 
 static bool
-check_memory_init_size(bool is_memory64, uint32 init_size, uint32 num_bytes_per_page, char *error_buf,
+check_memory_init_size(bool is_memory64, uint32 init_size,
+                       uint32 num_bytes_per_page, char *error_buf,
                        uint32 error_buf_size)
 {
-    uint32 default_max_size = CALCULATE_DEFAULT_MAX_SIZE(is_memory64, num_bytes_per_page);
+    uint32 default_max_size =
+        CALCULATE_DEFAULT_MAX_SIZE(is_memory64, num_bytes_per_page);
 
     if (!is_memory64 && init_size > default_max_size) {
         set_error_buf(error_buf, error_buf_size,
@@ -3008,10 +3012,12 @@ check_memory_init_size(bool is_memory64, uint32 init_size, uint32 num_bytes_per_
 }
 
 static bool
-check_memory_max_size(bool is_memory64, uint32 init_size, uint32 num_bytes_per_page, uint32 max_size,
+check_memory_max_size(bool is_memory64, uint32 init_size,
+                      uint32 num_bytes_per_page, uint32 max_size,
                       char *error_buf, uint32 error_buf_size)
 {
-    uint32 default_max_size = CALCULATE_DEFAULT_MAX_SIZE(is_memory64, num_bytes_per_page);
+    uint32 default_max_size =
+        CALCULATE_DEFAULT_MAX_SIZE(is_memory64, num_bytes_per_page);
 
     if (max_size < init_size) {
         set_error_buf(error_buf, error_buf_size,
@@ -3070,24 +3076,25 @@ load_memory_import(const uint8 **p_buf, const uint8 *buf_end,
         return false;
     }
 
-    if (mem_flag & CUSTOM_PAGE_SIZE_FLAG){
+    if (mem_flag & CUSTOM_PAGE_SIZE_FLAG) {
         LOG_VERBOSE("Detected custom page size. Setting to 1");
         num_bytes_per_page = 1;
         is_custom_page_size = true;
     }
-
 
     if (!wasm_memory_check_flags(mem_flag, error_buf, error_buf_size, false)) {
         return false;
     }
 
     read_leb_uint32(p, p_end, declare_init_page_count);
-    if (!check_memory_init_size(is_memory64, declare_init_page_count, num_bytes_per_page, error_buf,
+    if (!check_memory_init_size(is_memory64, declare_init_page_count,
+                                num_bytes_per_page, error_buf,
                                 error_buf_size)) {
         return false;
     }
 
-    uint32 custom_pages_multiplier = DEFAULT_NUM_BYTES_PER_PAGE / num_bytes_per_page;
+    uint32 custom_pages_multiplier =
+        DEFAULT_NUM_BYTES_PER_PAGE / num_bytes_per_page;
 
 #if WASM_ENABLE_APP_FRAMEWORK == 0
     max_page_count = is_memory64 ? DEFAULT_MEM64_MAX_PAGES : DEFAULT_MAX_PAGES;
@@ -3095,9 +3102,9 @@ load_memory_import(const uint8 **p_buf, const uint8 *buf_end,
 #endif
     if (mem_flag & MAX_PAGE_COUNT_FLAG) {
         read_leb_uint32(p, p_end, declare_max_page_count);
-        if (!check_memory_max_size(is_memory64, declare_init_page_count, num_bytes_per_page,
-                                   declare_max_page_count, error_buf,
-                                   error_buf_size)) {
+        if (!check_memory_max_size(is_memory64, declare_init_page_count,
+                                   num_bytes_per_page, declare_max_page_count,
+                                   error_buf, error_buf_size)) {
             return false;
         }
         if (declare_max_page_count > max_page_count) {
@@ -3109,10 +3116,10 @@ load_memory_import(const uint8 **p_buf, const uint8 *buf_end,
         declare_max_page_count = max_page_count;
     }
 
-    if (is_custom_page_size){
-        // there is an axtra byte at the end of import section for future extension
-        // ignore it for now
-        p++; 
+    if (is_custom_page_size) {
+        // there is an axtra byte at the end of import section for future
+        // extension ignore it for now
+        p++;
     }
 
 #if WASM_ENABLE_MULTI_MODULE != 0
@@ -3504,7 +3511,7 @@ load_memory(const uint8 **p_buf, const uint8 *buf_end, WASMMemory *memory,
         return false;
     }
 
-       if (memory->flags & CUSTOM_PAGE_SIZE_FLAG) {
+    if (memory->flags & CUSTOM_PAGE_SIZE_FLAG) {
         num_bytes_per_page = 1;
         is_custom_page_size = true;
     }
@@ -3515,20 +3522,21 @@ load_memory(const uint8 **p_buf, const uint8 *buf_end, WASMMemory *memory,
     }
 
     read_leb_uint32(p, p_end, memory->init_page_count);
-    if (!check_memory_init_size(is_memory64, memory->init_page_count, num_bytes_per_page, error_buf,
-                                error_buf_size))
+    if (!check_memory_init_size(is_memory64, memory->init_page_count,
+                                num_bytes_per_page, error_buf, error_buf_size))
         return false;
 
-        uint32 custom_pages_multiplier = DEFAULT_NUM_BYTES_PER_PAGE / num_bytes_per_page;
+    uint32 custom_pages_multiplier =
+        DEFAULT_NUM_BYTES_PER_PAGE / num_bytes_per_page;
 #if WASM_ENABLE_APP_FRAMEWORK == 0
     max_page_count = is_memory64 ? DEFAULT_MEM64_MAX_PAGES : DEFAULT_MAX_PAGES;
     max_page_count *= custom_pages_multiplier;
 #endif
     if (memory->flags & 1) {
         read_leb_uint32(p, p_end, memory->max_page_count);
-        if (!check_memory_max_size(is_memory64, memory->init_page_count, num_bytes_per_page, 
-                                   memory->max_page_count, error_buf,
-                                   error_buf_size))
+        if (!check_memory_max_size(is_memory64, memory->init_page_count,
+                                   num_bytes_per_page, memory->max_page_count,
+                                   error_buf, error_buf_size))
             return false;
         if (memory->max_page_count > max_page_count)
             memory->max_page_count = max_page_count;
@@ -6725,7 +6733,9 @@ load_from_sections(WASMModule *module, WASMSection *sections,
         if (module->import_memory_count) {
             WASMMemoryImport *memory_import =
                 &module->import_memories[0].u.memory;
-            uint32 custom_pages_multiplier = DEFAULT_NUM_BYTES_PER_PAGE / memory_import->mem_type.num_bytes_per_page;
+            uint32 custom_pages_multiplier =
+                DEFAULT_NUM_BYTES_PER_PAGE
+                / memory_import->mem_type.num_bytes_per_page;
             uint32 max_pages = DEFAULT_MAX_PAGES * custom_pages_multiplier;
             /* Only resize the memory to one big page if num_bytes_per_page is
              * in valid range of uint32 */
@@ -6743,7 +6753,8 @@ load_from_sections(WASMModule *module, WASMSection *sections,
         }
         if (module->memory_count) {
             WASMMemory *memory = &module->memories[0];
-            uint32 custom_pages_multiplier = DEFAULT_NUM_BYTES_PER_PAGE / memory->num_bytes_per_page;
+            uint32 custom_pages_multiplier =
+                DEFAULT_NUM_BYTES_PER_PAGE / memory->num_bytes_per_page;
             uint32 max_pages = DEFAULT_MAX_PAGES * custom_pages_multiplier;
 
             /* Only resize(shrunk) the memory size if num_bytes_per_page is in
