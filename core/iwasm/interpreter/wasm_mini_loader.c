@@ -934,7 +934,12 @@ load_memory_import(const uint8 **p_buf, const uint8 *buf_end,
     memory->mem_type.flags = mem_flag;
     memory->mem_type.init_page_count = declare_init_page_count;
     memory->mem_type.max_page_count = declare_max_page_count;
-    memory->mem_type.num_bytes_per_page = DEFAULT_NUM_BYTES_PER_PAGE;
+    if (mem_flag & CUSTOM_PAGE_SIZE_FLAG) {
+        memory->mem_type.num_bytes_per_page = CUSTOM_NUM_BYTES_PER_PAGE;
+    }else {
+memory->mem_type.num_bytes_per_page = DEFAULT_NUM_BYTES_PER_PAGE;
+    }
+    
 
     *p_buf = p;
     return true;
@@ -1067,7 +1072,14 @@ load_memory(const uint8 **p_buf, const uint8 *buf_end, WASMMemory *memory,
         memory->max_page_count = max_page_count;
     }
 
-    memory->num_bytes_per_page = DEFAULT_NUM_BYTES_PER_PAGE;
+    printf("I am overwriting with default value: %d\n", DEFAULT_NUM_BYTES_PER_PAGE);
+    if(memory->flags & CUSTOM_PAGE_SIZE_FLAG) {
+memory->num_bytes_per_page = CUSTOM_NUM_BYTES_PER_PAGE;
+    }
+    else {
+        memory->num_bytes_per_page = DEFAULT_NUM_BYTES_PER_PAGE;
+    }
+    
 
     *p_buf = p;
     return true;
