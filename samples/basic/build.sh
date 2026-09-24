@@ -42,8 +42,12 @@ APP_SRC="$i"
 OUT_FILE=${i%.*}.wasm
 
 # use WAMR SDK to build out the .wasm binary
+# Custom page size (16KB vs default 64KB) reduces linear-memory heap
+# footprint on memory-constrained OCRE targets; requires a WAMR runtime
+# built with WAMR_BUILD_CUSTOM_PAGE_SIZE=1 (the OCRE app default).
 /opt/wasi-sdk/bin/clang     \
         --target=wasm32 -O0 -z stack-size=4096 -Wl,--initial-memory=65536 \
+        -Wl,--page-size=16384 \
         --sysroot=${WAMR_DIR}/wamr-sdk/app/libc-builtin-sysroot  \
         -Wl,--allow-undefined-file=${WAMR_DIR}/wamr-sdk/app/libc-builtin-sysroot/share/defined-symbols.txt \
         -Wl,--strip-all,--no-entry -nostdlib \
