@@ -19,6 +19,27 @@ wasm_loader_set_error_buf(char *error_buf, uint32 error_buf_size,
     }
 }
 
+uint32
+wasm_calculate_max_page_count(bool is_memory64, uint32 num_bytes_per_page)
+{
+    uint32 custom_pages_multiplier;
+    uint64 result;
+
+    if (num_bytes_per_page == 0) {
+        /* defensive; structurally unreachable post wasm_check_page_size_log2
+         */
+        return UINT32_MAX;
+    }
+
+    custom_pages_multiplier = DEFAULT_NUM_BYTES_PER_PAGE / num_bytes_per_page;
+    result = (uint64)(is_memory64 ? DEFAULT_MEM64_MAX_PAGES : DEFAULT_MAX_PAGES)
+             * (uint64)custom_pages_multiplier;
+    if (result > UINT32_MAX) {
+        result = UINT32_MAX;
+    }
+    return (uint32)result;
+}
+
 #if WASM_ENABLE_MEMORY64 != 0
 bool
 check_memory64_flags_consistency(WASMModule *module, char *error_buf,

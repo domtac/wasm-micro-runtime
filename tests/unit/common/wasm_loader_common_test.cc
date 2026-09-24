@@ -65,3 +65,46 @@ TEST(wasm_loader_common, page_size_log2_uint32_max_invalid)
     EXPECT_FALSE(ret);
 }
 #endif /* WASM_ENABLE_CUSTOM_PAGE_SIZE != 0 */
+
+TEST(wasm_loader_common, max_page_count_default_page_size)
+{
+    /* num_bytes_per_page = 65536 (default), non-memory64 */
+    EXPECT_EQ(wasm_calculate_max_page_count(false, 65536u), 65536u);
+}
+
+TEST(wasm_loader_common, max_page_count_smallest_custom_page_size_overflow)
+{
+    /* multiplier = 65536, DEFAULT_MAX_PAGES(65536) * 65536 = 2^32,
+     * must clamp to UINT32_MAX (today's ==0 check happens to also catch
+     * this exact-wrap case, the new logic must too) */
+    EXPECT_EQ(wasm_calculate_max_page_count(false, 1u), UINT32_MAX);
+}
+
+#if WASM_ENABLE_MEMORY64 != 0
+TEST(wasm_loader_common, max_page_count_memory64_smallest_custom_page_size)
+{
+    /* is_memory64=true, num_bytes_per_page=1 (multiplier=65536):
+     * DEFAULT_MEM64_MAX_PAGES(UINT32_MAX) * 65536 overflows to a
+     * large-but-not-zero garbage value under the old ==0-only logic;
+     * this is the discriminating proof the new uint64-intermediate
+     * clamp must catch it. */
+    EXPECT_EQ(wasm_calculate_max_page_count(true, 1u), UINT32_MAX);
+}
+
+TEST(wasm_loader_common, max_page_count_memory64_moderate_custom_page_size)
+{
+    /* is_memory64=true, num_bytes_per_page=256 (multiplier=256):
+     * UINT32_MAX * 256 overflows to a different non-zero garbage value
+     * under the old logic; second, differently-valued overflow case,
+     * ruling out a coincidental single-value fix. */
+    EXPECT_EQ(wasm_calculate_max_page_count(true, 256u), UINT32_MAX);
+}
+#endif /* WASM_ENABLE_MEMORY64 != 0 */
+
+TEST(wasm_loader_common, max_page_count_zero_bytes_per_page_defensive)
+{
+    /* structurally unreachable post wasm_check_page_size_log2, but the
+     * helper must defend against divide-by-zero regardless. */
+    EXPECT_EQ(wasm_calculate_max_page_count(false, 0u), UINT32_MAX);
+    EXPECT_EQ(wasm_calculate_max_page_count(true, 0u), UINT32_MAX);
+}

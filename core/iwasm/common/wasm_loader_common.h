@@ -35,6 +35,9 @@ wasm_check_page_size_log2(uint32 page_size_log2, uint32 *num_bytes_per_page,
                           char *error_buf, uint32 error_buf_size, bool is_aot);
 #endif
 
+uint32
+wasm_calculate_max_page_count(bool is_memory64, uint32 num_bytes_per_page);
+
 bool
 is_valid_value_type(uint8 value_tpye);
 
