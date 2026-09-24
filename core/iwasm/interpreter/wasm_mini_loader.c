@@ -934,7 +934,18 @@ load_memory_import(const uint8 **p_buf, const uint8 *buf_end,
     memory->mem_type.flags = mem_flag;
     memory->mem_type.init_page_count = declare_init_page_count;
     memory->mem_type.max_page_count = declare_max_page_count;
-    memory->mem_type.num_bytes_per_page = DEFAULT_NUM_BYTES_PER_PAGE;
+    if (mem_flag & CUSTOM_PAGE_SIZE_FLAG) {
+        uint32 page_size_log2 = 0;
+        read_leb_uint32(p, p_end, page_size_log2);
+        if (!wasm_check_page_size_log2(page_size_log2,
+                                        &memory->mem_type.num_bytes_per_page,
+                                        error_buf, error_buf_size, false)) {
+            return false;
+        }
+    }
+    else {
+        memory->mem_type.num_bytes_per_page = DEFAULT_NUM_BYTES_PER_PAGE;
+    }
 
     *p_buf = p;
     return true;
@@ -1067,7 +1078,18 @@ load_memory(const uint8 **p_buf, const uint8 *buf_end, WASMMemory *memory,
         memory->max_page_count = max_page_count;
     }
 
-    memory->num_bytes_per_page = DEFAULT_NUM_BYTES_PER_PAGE;
+    if (memory->flags & CUSTOM_PAGE_SIZE_FLAG) {
+        uint32 page_size_log2 = 0;
+        read_leb_uint32(p, p_end, page_size_log2);
+        if (!wasm_check_page_size_log2(page_size_log2,
+                                        &memory->num_bytes_per_page,
+                                        error_buf, error_buf_size, false)) {
+            return false;
+        }
+    }
+    else {
+        memory->num_bytes_per_page = DEFAULT_NUM_BYTES_PER_PAGE;
+    }
 
     *p_buf = p;
     return true;
