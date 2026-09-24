@@ -1983,7 +1983,7 @@ load_table_segment_section(const uint8 *buf, const uint8 *buf_end,
 
 #if WASM_ENABLE_MEMORY64 != 0
             if (table_elem_idx_type == VALUE_TYPE_I64
-                && table_segment->base_offset.u.u64 > UINT32_MAX) {
+                && table_segment->base_offset.u.unary.v.u64 > UINT32_MAX) {
                 set_error_buf(error_buf, error_buf_size,
                               "In table64, table base offset can't be "
                               "larger than UINT32_MAX");

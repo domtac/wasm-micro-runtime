@@ -1814,11 +1814,41 @@ wasm_enlarge_memory_internal(WASMModuleInstanceCommon *module,
             }
         }
 
-        if (!(memory_data_new =
-                  wasm_mremap_linear_memory(memory_data_old, total_size_old,
-                                            total_size_new, total_size_new))) {
-            ret = false;
-            goto return_func;
+        /*
+         * Same rationale as the full_size_mmaped branch above:
+         * total_size_old is the memory's page-aligned allocation size
+         * from wasm_allocate_linear_memory (aligned to the host's OS
+         * page size unconditionally, regardless of full_size_mmaped),
+         * while total_size_new (num_bytes_per_page * total_page_count)
+         * is the raw, unaligned logical size. For a custom page size
+         * smaller than the host's page granularity, raw new can be
+         * smaller than aligned old (e.g. growing a 256-byte-page memory
+         * from 1 to 3 pages: old aligned = 4096, new raw = 768), which
+         * would otherwise violate wasm_mremap_linear_memory's
+         * new_size > old_size precondition. Align both boundaries the
+         * same way before calling into it, and skip the OS-level
+         * remap/protect entirely when the new aligned boundary doesn't
+         * exceed the old one -- the region is already large enough from
+         * the prior (larger, aligned) allocation.
+         */
+        {
+            uint64 os_page_size = os_getpagesize();
+            uint64 total_size_old_aligned =
+                align_as_and_cast(total_size_old, os_page_size);
+            uint64 total_size_new_aligned =
+                align_as_and_cast(total_size_new, os_page_size);
+
+            if (total_size_new_aligned > total_size_old_aligned) {
+                if (!(memory_data_new = wasm_mremap_linear_memory(
+                          memory_data_old, total_size_old_aligned,
+                          total_size_new_aligned, total_size_new_aligned))) {
+                    ret = false;
+                    goto return_func;
+                }
+            }
+            else {
+                memory_data_new = memory_data_old;
+            }
         }
 
         if (heap_size > 0) {

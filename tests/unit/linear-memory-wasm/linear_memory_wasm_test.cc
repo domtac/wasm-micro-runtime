@@ -119,10 +119,23 @@ namespace {
 
 /* Wire-format flag bits for the custom-page-sizes proposal. */
 constexpr uint8_t kMaxPageCountFlag = 0x01;
+constexpr uint8_t kMemory64Flag = 0x04;
 constexpr uint8_t kCustomPageSizeFlag = 0x08;
 
 void
 append_leb_u32(std::vector<uint8_t> &buf, uint32_t value)
+{
+    do {
+        uint8_t byte = value & 0x7f;
+        value >>= 7;
+        if (value != 0)
+            byte |= 0x80;
+        buf.push_back(byte);
+    } while (value != 0);
+}
+
+void
+append_leb_u64(std::vector<uint8_t> &buf, uint64_t value)
 {
     do {
         uint8_t byte = value & 0x7f;
@@ -232,6 +245,79 @@ build_custom_page_size_grow_and_size_module()
     return module;
 }
 
+/*
+ * Hand-builds a memory64 + custom-page-size module:
+ *  - one memory: flags=(CUSTOM_PAGE_SIZE_FLAG|MAX_PAGE_COUNT_FLAG|
+ *    MEMORY64_FLAG)=0x0D, init=1, max=10 (u64-LEB, memory64 index width),
+ *    page_size_log2=8 (256 bytes/page)
+ *  - one exported function () -> i64 named "grow_and_size_mem64" whose
+ *    body is: i64.const 2; memory.grow 0; drop; memory.size 0; end
+ * (grows memory by 2 pages then returns the new page count as i64).
+ */
+std::vector<uint8_t>
+build_memory64_custom_page_size_grow_and_size_module()
+{
+    std::vector<uint8_t> module;
+    append_header(module);
+
+    /* type section: one func type () -> (i64) */
+    std::vector<uint8_t> type_section;
+    append_leb_u32(type_section, 1); /* type count */
+    type_section.push_back(0x60);   /* func */
+    type_section.push_back(0x00);   /* param count */
+    type_section.push_back(0x01);   /* result count */
+    type_section.push_back(0x7e);   /* i64 */
+    append_section(module, /* SECTION_TYPE_TYPE */ 1, type_section);
+
+    /* function section: one function, type index 0 */
+    std::vector<uint8_t> function_section;
+    append_leb_u32(function_section, 1);
+    append_leb_u32(function_section, 0);
+    append_section(module, /* SECTION_TYPE_FUNC */ 3, function_section);
+
+    /* memory section: flags=0x0D, init=1, max=10 (u64), page_size_log2=8 */
+    std::vector<uint8_t> mem_section;
+    append_leb_u32(mem_section, 1); /* memory count */
+    uint8_t mem_flags =
+        kCustomPageSizeFlag | kMaxPageCountFlag | kMemory64Flag;
+    mem_section.push_back(mem_flags);
+    append_leb_u64(mem_section, 1);  /* init (u64) */
+    append_leb_u64(mem_section, 10); /* max (u64) */
+    append_leb_u32(mem_section, 8);  /* page_size_log2 */
+    append_section(module, /* SECTION_TYPE_MEMORY */ 5, mem_section);
+
+    /* export section: export function 0 as "grow_and_size_mem64" */
+    std::vector<uint8_t> export_section;
+    append_leb_u32(export_section, 1); /* export count */
+    const char *export_name = "grow_and_size_mem64";
+    append_leb_u32(export_section, (uint32_t)strlen(export_name));
+    export_section.insert(export_section.end(), export_name,
+                          export_name + strlen(export_name));
+    export_section.push_back(/* EXPORT_KIND_FUNC */ 0);
+    append_leb_u32(export_section, 0); /* function index 0 */
+    append_section(module, /* SECTION_TYPE_EXPORT */ 7, export_section);
+
+    /* code section: body = i64.const 2; memory.grow 0; drop;
+     * memory.size 0; end */
+    std::vector<uint8_t> code_section;
+    append_leb_u32(code_section, 1); /* function body count */
+    std::vector<uint8_t> body;
+    body.push_back(0x00); /* local decl count */
+    body.push_back(0x42); /* i64.const */
+    body.push_back(0x02); /* 2 */
+    body.push_back(0x40); /* memory.grow */
+    body.push_back(0x00); /* memidx */
+    body.push_back(0x1a); /* drop */
+    body.push_back(0x3f); /* memory.size */
+    body.push_back(0x00); /* memidx */
+    body.push_back(0x0b); /* end */
+    append_leb_u32(code_section, (uint32_t)body.size());
+    code_section.insert(code_section.end(), body.begin(), body.end());
+    append_section(module, /* SECTION_TYPE_CODE */ 10, code_section);
+
+    return module;
+}
+
 } // namespace
 
 TEST_F(TEST_SUITE_NAME, test_custom_page_size_memory_grow_and_size_execution)
@@ -291,6 +377,65 @@ TEST_F(TEST_SUITE_NAME, test_custom_page_size_memory_grow_and_size_execution)
     wasm_runtime_deinstantiate(wasm_module_inst);
     wasm_runtime_unload(wasm_module);
 }
+
+#if WASM_ENABLE_MEMORY64 != 0
+TEST_F(TEST_SUITE_NAME,
+       test_memory64_custom_page_size_memory_grow_and_size_execution)
+{
+    auto module_bytes = build_memory64_custom_page_size_grow_and_size_module();
+
+    char error_buf[128] = { 0 };
+    wasm_module_t wasm_module = wasm_runtime_load(
+        module_bytes.data(), (uint32_t)module_bytes.size(), error_buf,
+        sizeof(error_buf));
+    ASSERT_NE(nullptr, wasm_module) << error_buf;
+
+    /* heap_size=0, same rationale as the memory32 custom-page-size test
+     * above: avoid the app-heap-insertion logic skewing page counts at a
+     * tiny 256-byte page size. */
+    wasm_module_inst_t wasm_module_inst = wasm_runtime_instantiate(
+        wasm_module, 16 * 1024, /* heap_size */ 0, error_buf,
+        sizeof(error_buf));
+    ASSERT_NE(nullptr, wasm_module_inst) << error_buf;
+
+    wasm_exec_env_t exec_env =
+        wasm_runtime_create_exec_env(wasm_module_inst, 16 * 1024);
+    ASSERT_NE(nullptr, exec_env);
+
+    WASMFunctionInstanceCommon *func = wasm_runtime_lookup_function(
+        wasm_module_inst, "grow_and_size_mem64");
+    ASSERT_NE(nullptr, func);
+
+    /* i64 result occupies two argv slots (WAMR ABI). */
+    uint32 argv[2] = { 0, 0 };
+    bool ret = wasm_runtime_call_wasm(exec_env, func, 0, argv);
+    ASSERT_TRUE(ret) << wasm_runtime_get_exception(wasm_module_inst);
+
+    uint64 result;
+    memcpy(&result, argv, sizeof(uint64));
+    /* grow_and_size_mem64 grows by 2 pages (1 -> 3) and returns
+     * memory.size as i64. */
+    EXPECT_EQ(3u, result);
+
+    wasm_memory_inst_t memory_inst =
+        wasm_runtime_get_memory(wasm_module_inst, 0);
+    ASSERT_NE(nullptr, memory_inst);
+    EXPECT_EQ(3u, wasm_memory_get_cur_page_count(memory_inst));
+    EXPECT_EQ(256u, wasm_memory_get_bytes_per_page(memory_inst));
+
+    /* Same discriminating bounds-check proof as the memory32 case,
+     * confirming memory64 indexing doesn't change custom-page-size
+     * byte-size computation: 3 pages * 256 bytes/page = 768 bytes. */
+    EXPECT_TRUE(
+        wasm_runtime_validate_app_addr(wasm_module_inst, 0, 768));
+    EXPECT_FALSE(
+        wasm_runtime_validate_app_addr(wasm_module_inst, 0, 769));
+
+    wasm_runtime_destroy_exec_env(exec_env);
+    wasm_runtime_deinstantiate(wasm_module_inst);
+    wasm_runtime_unload(wasm_module);
+}
+#endif /* WASM_ENABLE_MEMORY64 != 0 */
 
 TEST_F(TEST_SUITE_NAME, test_wasm_mem_page_count)
 {
