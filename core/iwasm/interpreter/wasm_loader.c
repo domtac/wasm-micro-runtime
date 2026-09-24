@@ -3071,7 +3071,9 @@ load_memory_import(const uint8 **p_buf, const uint8 *buf_end,
     bool is_memory64 = false;
     uint32 declare_init_page_count = 0;
     uint32 declare_max_page_count = 0;
+#if WASM_ENABLE_CUSTOM_PAGE_SIZE != 0
     bool is_custom_page_size = false;
+#endif
     uint32 num_bytes_per_page = DEFAULT_NUM_BYTES_PER_PAGE;
 #if WASM_ENABLE_MULTI_MODULE != 0
     WASMModule *sub_module = NULL;
@@ -3088,7 +3090,9 @@ load_memory_import(const uint8 **p_buf, const uint8 *buf_end,
     }
 
     if (mem_flag & CUSTOM_PAGE_SIZE_FLAG) {
+#if WASM_ENABLE_CUSTOM_PAGE_SIZE != 0
         is_custom_page_size = true;
+#endif
     }
 
     if (!wasm_memory_check_flags(mem_flag, error_buf, error_buf_size, false)) {
@@ -3101,6 +3105,7 @@ load_memory_import(const uint8 **p_buf, const uint8 *buf_end,
         read_leb_uint32(p, p_end, declare_max_page_count);
     }
 
+#if WASM_ENABLE_CUSTOM_PAGE_SIZE != 0
     if (is_custom_page_size) {
         uint32 page_size_log2 = 0;
         read_leb_uint32(p, p_end, page_size_log2);
@@ -3109,6 +3114,7 @@ load_memory_import(const uint8 **p_buf, const uint8 *buf_end,
             return false;
         }
     }
+#endif
 
     if (!check_memory_init_size(is_memory64, declare_init_page_count,
                                 num_bytes_per_page, error_buf,
@@ -3516,7 +3522,9 @@ load_memory(const uint8 **p_buf, const uint8 *buf_end, WASMMemory *memory,
 #endif
     bool is_memory64 = false;
     uint32 num_bytes_per_page = DEFAULT_NUM_BYTES_PER_PAGE;
+#if WASM_ENABLE_CUSTOM_PAGE_SIZE != 0
     bool is_custom_page_size = false;
+#endif
 
     p_org = p;
     read_leb_uint32(p, p_end, memory->flags);
@@ -3528,7 +3536,9 @@ load_memory(const uint8 **p_buf, const uint8 *buf_end, WASMMemory *memory,
     }
 
     if (memory->flags & CUSTOM_PAGE_SIZE_FLAG) {
+#if WASM_ENABLE_CUSTOM_PAGE_SIZE != 0
         is_custom_page_size = true;
+#endif
     }
 
     if (!wasm_memory_check_flags(memory->flags, error_buf, error_buf_size,
@@ -3542,6 +3552,7 @@ load_memory(const uint8 **p_buf, const uint8 *buf_end, WASMMemory *memory,
         read_leb_uint32(p, p_end, memory->max_page_count);
     }
 
+#if WASM_ENABLE_CUSTOM_PAGE_SIZE != 0
     if (is_custom_page_size) {
         uint32 page_size_log2 = 0;
         read_leb_uint32(p, p_end, page_size_log2);
@@ -3550,6 +3561,7 @@ load_memory(const uint8 **p_buf, const uint8 *buf_end, WASMMemory *memory,
             return false;
         }
     }
+#endif
 
     if (!check_memory_init_size(is_memory64, memory->init_page_count,
                                 num_bytes_per_page, error_buf, error_buf_size))

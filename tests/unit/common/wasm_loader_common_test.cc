@@ -10,6 +10,7 @@ extern "C" {
 #include "wasm_loader_common.h"
 }
 
+#if WASM_ENABLE_CUSTOM_PAGE_SIZE != 0
 TEST(wasm_loader_common, page_size_log2_zero)
 {
     uint32 num_bytes_per_page = 0;
@@ -63,3 +64,4 @@ TEST(wasm_loader_common, page_size_log2_uint32_max_invalid)
                                          NULL, 0, false);
     EXPECT_FALSE(ret);
 }
+#endif /* WASM_ENABLE_CUSTOM_PAGE_SIZE != 0 */

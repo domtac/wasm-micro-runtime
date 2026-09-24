@@ -74,6 +74,13 @@ wasm_memory_check_flags(const uint8 mem_flag, char *error_buf,
             return false;
         }
 #endif
+#if WASM_ENABLE_CUSTOM_PAGE_SIZE == 0
+        if (mem_flag & CUSTOM_PAGE_SIZE_FLAG) {
+            wasm_loader_set_error_buf(error_buf, error_buf_size,
+                                      "invalid limits flags", is_aot);
+            return false;
+        }
+#endif
     }
 
     if (mem_flag > MAX_PAGE_COUNT_FLAG + SHARED_MEMORY_FLAG + MEMORY64_FLAG
@@ -123,6 +130,7 @@ wasm_table_check_flags(const uint8 table_flag, char *error_buf,
     return true;
 }
 
+#if WASM_ENABLE_CUSTOM_PAGE_SIZE != 0
 bool
 wasm_check_page_size_log2(uint32 page_size_log2, uint32 *num_bytes_per_page,
                           char *error_buf, uint32 error_buf_size, bool is_aot)
@@ -135,6 +143,7 @@ wasm_check_page_size_log2(uint32 page_size_log2, uint32 *num_bytes_per_page,
     *num_bytes_per_page = 1u << page_size_log2;
     return true;
 }
+#endif /* WASM_ENABLE_CUSTOM_PAGE_SIZE != 0 */
 
 /*
  * compare with a bigger type set in `wasm_value_type_size_internal()`,

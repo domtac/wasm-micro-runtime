@@ -29,9 +29,11 @@ bool
 wasm_table_check_flags(const uint8 table_flag, char *error_buf,
                        uint32 error_buf_size, bool is_aot);
 
+#if WASM_ENABLE_CUSTOM_PAGE_SIZE != 0
 bool
 wasm_check_page_size_log2(uint32 page_size_log2, uint32 *num_bytes_per_page,
                           char *error_buf, uint32 error_buf_size, bool is_aot);
+#endif
 
 bool
 is_valid_value_type(uint8 value_tpye);
