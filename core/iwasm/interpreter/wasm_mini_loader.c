@@ -923,7 +923,12 @@ load_memory_import(const uint8 **p_buf, const uint8 *buf_end,
     if (mem_flag & CUSTOM_PAGE_SIZE_FLAG) {
 #if WASM_ENABLE_CUSTOM_PAGE_SIZE != 0
         uint32 page_size_log2 = 0;
-        read_leb_uint32(p, p_end, page_size_log2);
+        uint64 res64 = 0;
+        if (!read_leb((uint8 **)&p, p_end, 32, false, &res64, error_buf,
+                      error_buf_size)) {
+            return false;
+        }
+        page_size_log2 = (uint32)res64;
         if (!wasm_check_page_size_log2(page_size_log2, &num_bytes_per_page,
                                        error_buf, error_buf_size, false)) {
             return false;
@@ -1081,7 +1086,12 @@ load_memory(const uint8 **p_buf, const uint8 *buf_end, WASMMemory *memory,
     if (memory->flags & CUSTOM_PAGE_SIZE_FLAG) {
 #if WASM_ENABLE_CUSTOM_PAGE_SIZE != 0
         uint32 page_size_log2 = 0;
-        read_leb_uint32(p, p_end, page_size_log2);
+        uint64 res64 = 0;
+        if (!read_leb((uint8 **)&p, p_end, 32, false, &res64, error_buf,
+                      error_buf_size)) {
+            return false;
+        }
+        page_size_log2 = (uint32)res64;
         if (!wasm_check_page_size_log2(page_size_log2, &num_bytes_per_page,
                                        error_buf, error_buf_size, false)) {
             return false;

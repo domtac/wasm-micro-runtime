@@ -6802,10 +6802,8 @@ load_from_sections(WASMModule *module, WASMSection *sections,
         if (module->import_memory_count) {
             WASMMemoryImport *memory_import =
                 &module->import_memories[0].u.memory;
-            uint32 custom_pages_multiplier =
-                DEFAULT_NUM_BYTES_PER_PAGE
-                / memory_import->mem_type.num_bytes_per_page;
-            uint32 max_pages = DEFAULT_MAX_PAGES * custom_pages_multiplier;
+            uint32 max_pages = wasm_calculate_max_page_count(
+                false, memory_import->mem_type.num_bytes_per_page);
             /* Only resize the memory to one big page if num_bytes_per_page is
              * in valid range of uint32 */
             if (memory_import->mem_type.init_page_count < max_pages) {
@@ -6822,9 +6820,8 @@ load_from_sections(WASMModule *module, WASMSection *sections,
         }
         if (module->memory_count) {
             WASMMemory *memory = &module->memories[0];
-            uint32 custom_pages_multiplier =
-                DEFAULT_NUM_BYTES_PER_PAGE / memory->num_bytes_per_page;
-            uint32 max_pages = DEFAULT_MAX_PAGES * custom_pages_multiplier;
+            uint32 max_pages = wasm_calculate_max_page_count(
+                false, memory->num_bytes_per_page);
 
             /* Only resize(shrunk) the memory size if num_bytes_per_page is in
              * valid range of uint32 */
