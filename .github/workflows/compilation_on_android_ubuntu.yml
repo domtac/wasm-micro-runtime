@@ -69,6 +69,7 @@ env:
   GC_TEST_OPTIONS: "-s spec -G -b -P"
   MEMORY64_TEST_OPTIONS: "-s spec -W -b -P"
   MULTI_MEMORY_TEST_OPTIONS: "-s spec -E -b -P"
+  CUSTOM_PAGE_SIZES_TEST_OPTIONS: "-s spec -Y -b -P"
   EXTENDED_CONST_EXPR_TEST_OPTIONS: "-s spec -N -b -P"
 
 permissions:
@@ -664,6 +665,7 @@ jobs:
             $GC_TEST_OPTIONS,
             $MEMORY64_TEST_OPTIONS,
             $MULTI_MEMORY_TEST_OPTIONS,
+            $CUSTOM_PAGE_SIZES_TEST_OPTIONS,
             $EXTENDED_CONST_EXPR_TEST_OPTIONS,
           ]
         include:

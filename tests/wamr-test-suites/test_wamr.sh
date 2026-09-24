@@ -28,6 +28,7 @@ function help()
     echo "-G enable GC feature"
     echo "-W enable memory64 feature"
     echo "-E enable multi memory feature"
+    echo "-Y enable custom page sizes feature"
     echo "-X enable XIP feature"
     echo "-e enable exception handling"
     echo "-x test SGX"
@@ -68,6 +69,7 @@ ENABLE_GC=0
 ENABLE_EXTENDED_CONST_EXPR=0
 ENABLE_MEMORY64=0
 ENABLE_MULTI_MEMORY=0
+ENABLE_CUSTOM_PAGE_SIZES=0
 ENABLE_XIP=0
 ENABLE_EH=0
 ENABLE_DEBUG_VERSION=0
@@ -95,7 +97,7 @@ REQUIREMENT_NAME=""
 # Initialize an empty array for subrequirement IDs
 SUBREQUIREMENT_IDS=()
 
-while getopts ":s:cabgvt:m:MCpSXexwWEPGQF:j:T:r:A:NU" opt
+while getopts ":s:cabgvt:m:MCpSXexwWEYPGQF:j:T:r:A:NU" opt
 do
     OPT_PARSED="TRUE"
     case $opt in
@@ -162,6 +164,10 @@ do
         echo "enable multi memory feature(auto enable multi module)"
         ENABLE_MULTI_MEMORY=1
         ENABLE_MULTI_MODULE=1
+        ;;
+        Y)
+        echo "enable custom page sizes feature"
+        ENABLE_CUSTOM_PAGE_SIZES=1
         ;;
         C)
         echo "enable code coverage"
@@ -542,6 +548,21 @@ function spec_test()
         if [[ ${RUNNING_MODE} == "aot" ]]; then
             git apply --ignore-whitespace ../../spec-test-script/multi_module_aot_ignore_cases.patch || exit 1
         fi
+    elif [[ ${ENABLE_CUSTOM_PAGE_SIZES} == 1 ]]; then
+        echo "checkout spec for custom page sizes proposal"
+
+        # check spec test cases for custom page sizes
+        git clone -b main --single-branch https://github.com/WebAssembly/custom-page-sizes.git spec
+        pushd spec
+
+        # Pin to the main HEAD at the time this story was implemented,
+        # to avoid the test suite silently drifting on subsequent CI runs
+        git reset --hard 0f479eba15b2226adb0b11c63e90d778206e7eeb
+        # Excludes cases that require multi-memory (a separate proposal with
+        # its own spec-test job) or the `(module definition ...)` WAST
+        # directive (not supported by the pinned WABT), per-case reasons
+        # documented inline in the patch itself (NFR3/SM-C1)
+        git apply --ignore-whitespace ../../spec-test-script/custom_page_sizes_ignore_cases.patch || exit 1
     else
         echo "checkout spec for default proposal"
 
@@ -630,6 +651,10 @@ function spec_test()
         if [[ $1 == 'classic-interp' || $1 == 'aot' ]]; then
             ARGS_FOR_SPEC_TEST+="--multi-memory "
         fi
+    fi
+
+    if [[ 1 == ${ENABLE_CUSTOM_PAGE_SIZES} ]]; then
+        ARGS_FOR_SPEC_TEST+="--custom-page-sizes "
     fi
 
     if [[ ${ENABLE_QEMU} == 1 ]]; then
@@ -950,6 +975,15 @@ function do_execute_in_running_mode()
         fi
     fi
 
+    if [[ ${ENABLE_CUSTOM_PAGE_SIZES} -eq 1 ]]; then
+        if [[ "${RUNNING_MODE}" != "classic-interp" \
+                && "${RUNNING_MODE}" != "fast-jit" \
+                && "${RUNNING_MODE}" != "aot" ]]; then
+            echo "support custom-page-sizes in classic-interp, fast-jit and aot mode"
+            return 0
+        fi
+    fi
+
     if [[ ${ENABLE_MULTI_MODULE} -eq 1 ]]; then
         if [[ "${RUNNING_MODE}" != "classic-interp" \
                 && "${RUNNING_MODE}" != "fast-interp" \
@@ -1053,6 +1087,21 @@ function trigger()
     else
         EXTRA_COMPILE_FLAGS+=" -DWAMR_BUILD_MULTI_MEMORY=0"
     fi
+
+    # WAMR_BUILD_CUSTOM_PAGE_SIZE already defaults to 1 (see
+    # build-scripts/config_common.cmake), so this explicit flag doesn't
+    # change today's default-on behavior; it is added so the custom-page-sizes
+    # spec-test job doesn't silently depend on that default, mirroring how
+    # memory64/multi-memory explicitly enable their own feature flag here.
+    if [[ ${ENABLE_CUSTOM_PAGE_SIZES} == 1 ]];then
+        EXTRA_COMPILE_FLAGS+=" -DWAMR_BUILD_CUSTOM_PAGE_SIZE=1"
+    fi
+    # No `else ...=0` branch here (unlike WAMR_BUILD_MULTI_MEMORY above):
+    # WAMR_BUILD_CUSTOM_PAGE_SIZE already defaults to 1 for every other test
+    # job (see build-scripts/config_common.cmake); forcing it to 0 here would
+    # disable custom-page-size support for all existing non-`-Y` jobs
+    # (default, memory64, multi-memory, gc, ...), which is out of this
+    # story's scope and would be a regression, not a fix.
 
     if [[ ${ENABLE_MULTI_THREAD} == 1 ]];then
         EXTRA_COMPILE_FLAGS+=" -DWAMR_BUILD_LIB_PTHREAD=1"
