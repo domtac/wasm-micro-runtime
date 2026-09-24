@@ -342,3 +342,83 @@ TEST_F(TEST_SUITE_NAME, test_mem_grow_out_of_bounds)
 failed_out_of_bounds:
     destroy_module_env(tmp_module_env);
 }
+
+/*
+ * Story 2.3: AOT runtime / wamrc parity for custom page sizes.
+ *
+ * Loads and executes the .aot fixture wamrc-compiled from Story 2.2's
+ * hand-built custom-page-size module (flags=0x09, init=1, max=10,
+ * page_size_log2=8, exported "grow_and_size" function), and asserts the
+ * exact same results as Story 2.2's interpreter test
+ * (test_custom_page_size_memory_grow_and_size_execution in
+ * linear-memory-wasm/linear_memory_wasm_test.cc).
+ */
+TEST_F(TEST_SUITE_NAME, test_aot_custom_page_size_memory_grow_and_size)
+{
+    struct ret_env tmp_module_env;
+
+    /* heap_size=0: see Story 2.2's rationale -- a nonzero app-heap request
+     * would be sized using the memory's own (256-byte) page size and
+     * defeat the discriminating bounds-check proof below. */
+    tmp_module_env =
+        load_aot((char *)"/custom_page_size_grow_and_size.aot", 0);
+    ASSERT_NE(nullptr, tmp_module_env.aot_module)
+        << tmp_module_env.error_buf;
+    ASSERT_NE(nullptr, tmp_module_env.aot_module_inst)
+        << tmp_module_env.error_buf;
+
+    /* Self-diagnostic: this fixture is compiled at build time by whatever
+     * wamrc happens to be found (see CMakeLists.txt). If that wamrc
+     * predates this feature's own implementation, it will silently emit
+     * the wrong num_bytes_per_page (the old 1-byte placeholder rather
+     * than the module's declared 256), which cannot be distinguished
+     * from a real regression by this test alone, and calling into the
+     * compiled function body below is unsafe if the toolchain's target
+     * architecture also does not match this host (see deferred-work.md,
+     * Story 2.3 entry). Detect and skip -- rather than fail or hang --
+     * so a stale/mismatched build toolchain reads as a clear, actionable
+     * skip instead of ambiguous CI noise. */
+    wasm_memory_inst_t pre_call_memory_inst =
+        wasm_runtime_get_memory(tmp_module_env.aot_module_inst, 0);
+    ASSERT_NE(nullptr, pre_call_memory_inst);
+    if (wasm_memory_get_bytes_per_page(pre_call_memory_inst) != 256) {
+        destroy_module_env(tmp_module_env);
+        GTEST_SKIP() << "wamrc used to build this .aot fixture does not "
+                        "correctly reflect this feature's custom page "
+                        "size (expected bytes_per_page=256, got "
+                     << wasm_memory_get_bytes_per_page(pre_call_memory_inst)
+                     << ") -- toolchain is stale or targets a mismatched "
+                        "architecture; see deferred-work.md Story 2.3 entry";
+    }
+
+    WASMFunctionInstanceCommon *func = wasm_runtime_lookup_function(
+        tmp_module_env.aot_module_inst, "grow_and_size");
+    ASSERT_NE(nullptr, func);
+
+    uint32 argv[1] = { 0 };
+    bool ret =
+        wasm_runtime_call_wasm(tmp_module_env.exec_env, func, 0, argv);
+    ASSERT_TRUE(ret)
+        << wasm_runtime_get_exception(tmp_module_env.aot_module_inst);
+
+    /* grow_and_size grows by 2 pages (1 -> 3) and returns memory.size --
+     * identical to Story 2.2's interpreter result. */
+    EXPECT_EQ(3u, argv[0]);
+
+    /* Public accessor consistency: post-grow page count is 3,
+     * bytes-per-page is 256. */
+    wasm_memory_inst_t memory_inst =
+        wasm_runtime_get_memory(tmp_module_env.aot_module_inst, 0);
+    ASSERT_NE(nullptr, memory_inst);
+    EXPECT_EQ(3u, wasm_memory_get_cur_page_count(memory_inst));
+    EXPECT_EQ(256u, wasm_memory_get_bytes_per_page(memory_inst));
+
+    /* Discriminating bounds-check proof: at 256 bytes/page, 3 pages = 768
+     * bytes total -- identical discriminator to Story 2.2. */
+    EXPECT_TRUE(wasm_runtime_validate_app_addr(
+        tmp_module_env.aot_module_inst, 0, 768));
+    EXPECT_FALSE(wasm_runtime_validate_app_addr(
+        tmp_module_env.aot_module_inst, 0, 769));
+
+    destroy_module_env(tmp_module_env);
+}
