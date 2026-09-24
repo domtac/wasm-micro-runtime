@@ -1752,25 +1752,57 @@ wasm_enlarge_memory_internal(WASMModuleInstanceCommon *module,
     memory->memory_data = memory_data_new;
 #else
     if (full_size_mmaped) {
+        /*
+         * The initial commit (wasm_allocate_linear_memory) rounds the
+         * committed/protected region up to the host's OS page size,
+         * since os_mprotect/os_mem_commit require page-aligned addresses
+         * and lengths -- this is unrelated to the wasm-visible logical
+         * size (memory->memory_data_size / total_size_old here, which
+         * remains the exact, unaligned num_bytes_per_page * page_count
+         * after the first grow, and IS the aligned value at the point of
+         * first instantiation only). For the default 65536-byte page
+         * size this alignment is always a no-op (65536 is already a
+         * multiple of any real OS page size), but for a custom page size
+         * smaller than the host's page granularity, `total_size_new`
+         * (raw, unaligned) can be smaller than the ALREADY-aligned
+         * `total_size_old`, e.g. growing a 256-byte-page memory from 1
+         * to 3 pages: old (aligned at instantiation) = 4096, new (raw)
+         * = 768. Subtracting raw new - old aligned would underflow as
+         * an unsigned 64-bit value, producing a huge garbage length that
+         * os_mprotect would reject. Align BOTH boundaries the same way
+         * before comparing/subtracting, and skip the OS call entirely
+         * when the new aligned boundary doesn't exceed the old one --
+         * the region is already protected from a prior (larger, aligned)
+         * commit and no further OS-level change is needed.
+         */
+        uint64 os_page_size = os_getpagesize();
+        uint64 total_size_old_aligned =
+            align_as_and_cast(total_size_old, os_page_size);
+        uint64 total_size_new_aligned =
+            align_as_and_cast(total_size_new, os_page_size);
+
+        if (total_size_new_aligned > total_size_old_aligned) {
+            uint64 grow_bytes =
+                total_size_new_aligned - total_size_old_aligned;
+            uint8 *grow_addr = memory_data_old + total_size_old_aligned;
+
 #ifdef BH_PLATFORM_WINDOWS
-        if (!os_mem_commit(memory->memory_data_end,
-                           total_size_new - total_size_old,
-                           MMAP_PROT_READ | MMAP_PROT_WRITE)) {
-            ret = false;
-            goto return_func;
-        }
+            if (!os_mem_commit(grow_addr, grow_bytes,
+                               MMAP_PROT_READ | MMAP_PROT_WRITE)) {
+                ret = false;
+                goto return_func;
+            }
 #endif
 
-        if (os_mprotect(memory->memory_data_end,
-                        total_size_new - total_size_old,
-                        MMAP_PROT_READ | MMAP_PROT_WRITE)
-            != 0) {
+            if (os_mprotect(grow_addr, grow_bytes,
+                            MMAP_PROT_READ | MMAP_PROT_WRITE)
+                != 0) {
 #ifdef BH_PLATFORM_WINDOWS
-            os_mem_decommit(memory->memory_data_end,
-                            total_size_new - total_size_old);
+                os_mem_decommit(grow_addr, grow_bytes);
 #endif
-            ret = false;
-            goto return_func;
+                ret = false;
+                goto return_func;
+            }
         }
     }
     else {
