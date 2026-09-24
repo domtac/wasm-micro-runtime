@@ -14,6 +14,14 @@ set (WAMR_BUILD_INTERP 0)
 set (WAMR_BUILD_AOT 0)
 set (WAMR_BUILD_JIT 0)
 set (WAMR_BUILD_FAST_JIT 1)
+# WAMR_BUILD_MEMORY64 is intentionally NOT enabled here.
+# build-scripts/unsupported_combination.cmake hard-fails on
+# MEMORY64 + FAST_JIT ("Unsupported build configuration: MEMORY64 +
+# FAST_JIT") -- a project-wide architectural constraint, not a bug in
+# this test target. The memory64 test/module-builder code added to
+# linear_memory_fast_jit_test.cc is guarded by
+# #if WASM_ENABLE_MEMORY64 != 0 and stays inert (excluded from
+# compilation) until fast-jit gains memory64 support upstream.
 if (APPLE)
   set (WAMR_BUILD_INVOKE_NATIVE_GENERAL 1)
 endif ()
@@ -32,7 +40,7 @@ set (unit_test_sources
     ${UNCOMMON_SHARED_SOURCE}
 )
 
-# Story 2.4: fast-jit-only test target (no LLVM-JIT) proving memory.grow/
+# Fast-jit-only test target (no LLVM-JIT) proving memory.grow/
 # memory.size custom-page-size parity under fast-jit, mirroring
 # linear-memory-wasm's structure for the classic interpreter.
 add_executable (linear_memory_test_fast_jit ${unit_test_sources})
