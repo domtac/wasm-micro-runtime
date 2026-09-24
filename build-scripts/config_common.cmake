@@ -123,7 +123,7 @@ if (WAMR_BUILD_JIT EQUAL 1)
     set (LLVM_DIR ${LLVM_BUILD_ROOT}/lib/cmake/llvm)
   endif ()
   find_package(LLVM REQUIRED CONFIG)
-  include_directories(${LLVM_INCLUDE_DIRS})
+  include_directories(SYSTEM ${LLVM_INCLUDE_DIRS})
   add_definitions(${LLVM_DEFINITIONS})
   message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
   message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
@@ -196,7 +196,8 @@ if (NOT WAMR_BUILD_SANITIZER STREQUAL "")
     message(FATAL_ERROR "Unsupported sanitizers: ${INVALID_SANITIZERS}")
   endif()
   # common flags for all sanitizers
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -O0 -fno-omit-frame-pointer -fno-sanitize-recover=all -fno-sanitize=alignment")
+  # clang: warning: the object size sanitizer has no effect at -O0, but is explicitly enabled ... [-Winvalid-command-line-argument]
+  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -g -O1 -fno-omit-frame-pointer -fno-sanitize-recover=all -fno-sanitize=alignment")
   if(CMAKE_C_COMPILER_ID MATCHES ".*Clang")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fno-sanitize=unsigned-integer-overflow")
   endif()
@@ -252,6 +253,10 @@ endif ()
 
 if (NOT DEFINED WAMR_BUILD_MULTI_MEMORY)
   set (WAMR_BUILD_MULTI_MEMORY 0)
+endif ()
+
+if (NOT DEFINED WAMR_BUILD_CUSTOM_PAGE_SIZE)
+  set (WAMR_BUILD_CUSTOM_PAGE_SIZE 1)
 endif ()
 
 if (NOT DEFINED WAMR_BUILD_SHARED_MEMORY)
@@ -433,6 +438,9 @@ if (WAMR_BUILD_MULTI_MEMORY EQUAL 1)
   add_definitions (-DWASM_ENABLE_MULTI_MEMORY=1)
   set (WAMR_BUILD_DEBUG_INTERP 0)
 endif ()
+if (WAMR_BUILD_CUSTOM_PAGE_SIZE EQUAL 0)
+  add_definitions (-DWASM_ENABLE_CUSTOM_PAGE_SIZE=0)
+endif ()
 if (WAMR_BUILD_MINI_LOADER EQUAL 1)
   add_definitions (-DWASM_ENABLE_MINI_LOADER=1)
   message ("     WASM mini loader enabled")
@@ -476,6 +484,10 @@ endif ()
 if (WAMR_BUILD_MEMORY_PROFILING EQUAL 1)
   add_definitions (-DWASM_ENABLE_MEMORY_PROFILING=1)
   message ("     Memory profiling enabled")
+endif ()
+if (WAMR_BUILD_MEMORY_TRACING EQUAL 1)
+  add_definitions (-DWASM_ENABLE_MEMORY_TRACING=1)
+  message ("     Memory tracing enabled")
 endif ()
 if (WAMR_BUILD_PERF_PROFILING EQUAL 1)
   add_definitions (-DWASM_ENABLE_PERF_PROFILING=1)
@@ -774,6 +786,11 @@ endif ()
 if (WAMR_BUILD_LIME1 EQUAL 1)
   message ("     Lime1 enabled")
 endif ()
+if (WAMR_BUILD_BRANCH_HINTS EQUAL 1)
+  message ("     Branch hints enabled")
+  add_definitions(-DWASM_ENABLE_BRANCH_HINTS=1)
+endif ()
+
 ########################################
 # Show Phase4 Wasm proposals status.
 ########################################
@@ -786,8 +803,8 @@ message (
 "       \"Non-trapping float-to-int Conversions\"\n"
 "       \"Sign-extension Operators\"\n"
 "       \"WebAssembly C and C++ API\"\n"
-"       \"Branch Hinting\"\n"
 "     Configurable. 0 is OFF. 1 is ON:\n"
+"       \"Branch Hinting\" via WAMR_BUILD_BRANCH_HINTS: ${WAMR_BUILD_BRANCH_HINTS}\n"
 "       \"Bulk Memory Operation\" via WAMR_BUILD_BULK_MEMORY: ${WAMR_BUILD_BULK_MEMORY}\n"
 "       \"Bulk-memory-opt\" via WAMR_BUILD_BULK_MEMORY_OPT: ${WAMR_BUILD_BULK_MEMORY_OPT}\n"
 "       \"Call-indirect-overlong\" via WAMR_BUILD_CALL_INDIRECT_OVERLONG: ${WAMR_BUILD_CALL_INDIRECT_OVERLONG}\n"
@@ -797,6 +814,7 @@ message (
 "       \"Legacy Exception Handling\" via WAMR_BUILD_EXCE_HANDLING: ${WAMR_BUILD_EXCE_HANDLING}\n"
 "       \"Memory64\" via WAMR_BUILD_MEMORY64: ${WAMR_BUILD_MEMORY64}\n"
 "       \"Multiple Memories\" via WAMR_BUILD_MULTI_MEMORY: ${WAMR_BUILD_MULTI_MEMORY}\n"
+"       \"Custom Page Size\" via WAMR_BUILD_CUSTOM_PAGE_SIZE: ${WAMR_BUILD_CUSTOM_PAGE_SIZE}\n"
 "       \"Reference Types\" via WAMR_BUILD_REF_TYPES: ${WAMR_BUILD_REF_TYPES}\n"
 "       \"Reference-Typed Strings\" via WAMR_BUILD_STRINGREF: ${WAMR_BUILD_STRINGREF}\n"
 "       \"Tail Call\" via WAMR_BUILD_TAIL_CALL: ${WAMR_BUILD_TAIL_CALL}\n"

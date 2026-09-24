@@ -3228,7 +3228,7 @@ do_text_relocation(AOTModule *module, AOTRelocationGroup *group,
         if (!strncmp(symbol, AOT_FUNC_PREFIX, strlen(AOT_FUNC_PREFIX))) {
             p = symbol + strlen(AOT_FUNC_PREFIX);
             if (*p == '\0'
-                || (func_index = (uint32)atoi(p)) > module->func_count) {
+                || (func_index = (uint32)atoi(p)) >= module->func_count) {
                 set_error_buf_v(error_buf, error_buf_size,
                                 "invalid import symbol %s", symbol);
                 goto check_symbol_fail;
@@ -3262,7 +3262,7 @@ do_text_relocation(AOTModule *module, AOTRelocationGroup *group,
                           strlen("_" AOT_FUNC_PREFIX))) {
             p = symbol + strlen("_" AOT_FUNC_PREFIX);
             if (*p == '\0'
-                || (func_index = (uint32)atoi(p)) > module->func_count) {
+                || (func_index = (uint32)atoi(p)) >= module->func_count) {
                 set_error_buf_v(error_buf, error_buf_size, "invalid symbol %s",
                                 symbol);
                 goto check_symbol_fail;
@@ -3273,7 +3273,7 @@ do_text_relocation(AOTModule *module, AOTRelocationGroup *group,
                           strlen("_" AOT_FUNC_INTERNAL_PREFIX))) {
             p = symbol + strlen("_" AOT_FUNC_INTERNAL_PREFIX);
             if (*p == '\0'
-                || (func_index = (uint32)atoi(p)) > module->func_count) {
+                || (func_index = (uint32)atoi(p)) >= module->func_count) {
                 set_error_buf_v(error_buf, error_buf_size, "invalid symbol %s",
                                 symbol);
                 goto check_symbol_fail;
@@ -3463,7 +3463,7 @@ do_data_relocation(AOTModule *module, AOTRelocationGroup *group,
             char *p = symbol + strlen(AOT_FUNC_PREFIX);
             uint32 func_index;
             if (*p == '\0'
-                || (func_index = (uint32)atoi(p)) > module->func_count) {
+                || (func_index = (uint32)atoi(p)) >= module->func_count) {
                 set_error_buf_v(error_buf, error_buf_size,
                                 "invalid relocation symbol %s", symbol);
                 return false;
@@ -3872,7 +3872,7 @@ load_relocation_section(const uint8 *buf, const uint8 *buf_end,
                 read_uint32(buf, buf_end, offset32);
                 relocation->relocation_offset = (uint64)offset32;
                 read_uint32(buf, buf_end, addend32);
-                relocation->relocation_addend = (uint64)addend32;
+                relocation->relocation_addend = (int64)(int32)addend32;
             }
             read_uint32(buf, buf_end, relocation->relocation_type);
             read_uint32(buf, buf_end, symbol_index);
@@ -4422,7 +4422,7 @@ aot_compatible_version(uint32 version)
 {
     /*
      * refer to "AoT-compiled module compatibility among WAMR versions" in
-     * ./doc/biuld_wasm_app.md
+     * ./doc/build_wasm_app.md
      */
     return version == AOT_CURRENT_VERSION;
 }

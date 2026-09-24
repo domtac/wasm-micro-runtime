@@ -897,6 +897,7 @@ load_memory_import(const uint8 **p_buf, const uint8 *buf_end,
     bool is_memory64 = false;
     uint32 declare_init_page_count = 0;
     uint32 declare_max_page_count = 0;
+    uint32 num_bytes_per_page = DEFAULT_NUM_BYTES_PER_PAGE;
 
     /* the memory flag can't exceed one byte, only check in debug build given
      * the nature of mini-loader */
@@ -911,14 +912,38 @@ load_memory_import(const uint8 **p_buf, const uint8 *buf_end,
 
 #if WASM_ENABLE_APP_FRAMEWORK == 0
     is_memory64 = mem_flag & MEMORY64_FLAG;
-    max_page_count = is_memory64 ? DEFAULT_MEM64_MAX_PAGES : DEFAULT_MAX_PAGES;
 #endif
 
     read_leb_uint32(p, p_end, declare_init_page_count);
-    bh_assert(declare_init_page_count <= max_page_count);
 
     if (mem_flag & MAX_PAGE_COUNT_FLAG) {
         read_leb_uint32(p, p_end, declare_max_page_count);
+    }
+
+    if (mem_flag & CUSTOM_PAGE_SIZE_FLAG) {
+#if WASM_ENABLE_CUSTOM_PAGE_SIZE != 0
+        uint32 page_size_log2 = 0;
+        uint64 res64 = 0;
+        if (!read_leb((uint8 **)&p, p_end, 32, false, &res64, error_buf,
+                      error_buf_size)) {
+            return false;
+        }
+        page_size_log2 = (uint32)res64;
+        if (!wasm_check_page_size_log2(page_size_log2, &num_bytes_per_page,
+                                       error_buf, error_buf_size, false)) {
+            return false;
+        }
+#endif
+    }
+
+#if WASM_ENABLE_APP_FRAMEWORK == 0
+    max_page_count =
+        wasm_calculate_max_page_count(is_memory64, num_bytes_per_page);
+#endif
+
+    bh_assert(declare_init_page_count <= max_page_count);
+
+    if (mem_flag & MAX_PAGE_COUNT_FLAG) {
         bh_assert(declare_init_page_count <= declare_max_page_count);
         bh_assert(declare_max_page_count <= max_page_count);
         if (declare_max_page_count > max_page_count) {
@@ -934,7 +959,7 @@ load_memory_import(const uint8 **p_buf, const uint8 *buf_end,
     memory->mem_type.flags = mem_flag;
     memory->mem_type.init_page_count = declare_init_page_count;
     memory->mem_type.max_page_count = declare_max_page_count;
-    memory->mem_type.num_bytes_per_page = DEFAULT_NUM_BYTES_PER_PAGE;
+    memory->mem_type.num_bytes_per_page = num_bytes_per_page;
 
     *p_buf = p;
     return true;
@@ -1035,6 +1060,7 @@ load_memory(const uint8 **p_buf, const uint8 *buf_end, WASMMemory *memory,
     uint32 max_page_count;
     bool is_memory64 = false;
 #endif
+    uint32 num_bytes_per_page = DEFAULT_NUM_BYTES_PER_PAGE;
 
     /* the memory flag can't exceed one byte, only check in debug build given
      * the nature of mini-loader */
@@ -1049,14 +1075,38 @@ load_memory(const uint8 **p_buf, const uint8 *buf_end, WASMMemory *memory,
 
 #if WASM_ENABLE_APP_FRAMEWORK == 0
     is_memory64 = memory->flags & MEMORY64_FLAG;
-    max_page_count = is_memory64 ? DEFAULT_MEM64_MAX_PAGES : DEFAULT_MAX_PAGES;
 #endif
 
     read_leb_uint32(p, p_end, memory->init_page_count);
-    bh_assert(memory->init_page_count <= max_page_count);
 
     if (memory->flags & 1) {
         read_leb_uint32(p, p_end, memory->max_page_count);
+    }
+
+    if (memory->flags & CUSTOM_PAGE_SIZE_FLAG) {
+#if WASM_ENABLE_CUSTOM_PAGE_SIZE != 0
+        uint32 page_size_log2 = 0;
+        uint64 res64 = 0;
+        if (!read_leb((uint8 **)&p, p_end, 32, false, &res64, error_buf,
+                      error_buf_size)) {
+            return false;
+        }
+        page_size_log2 = (uint32)res64;
+        if (!wasm_check_page_size_log2(page_size_log2, &num_bytes_per_page,
+                                       error_buf, error_buf_size, false)) {
+            return false;
+        }
+#endif
+    }
+
+#if WASM_ENABLE_APP_FRAMEWORK == 0
+    max_page_count =
+        wasm_calculate_max_page_count(is_memory64, num_bytes_per_page);
+#endif
+
+    bh_assert(memory->init_page_count <= max_page_count);
+
+    if (memory->flags & 1) {
         bh_assert(memory->init_page_count <= memory->max_page_count);
         bh_assert(memory->max_page_count <= max_page_count);
         if (memory->max_page_count > max_page_count)
@@ -1067,7 +1117,7 @@ load_memory(const uint8 **p_buf, const uint8 *buf_end, WASMMemory *memory,
         memory->max_page_count = max_page_count;
     }
 
-    memory->num_bytes_per_page = DEFAULT_NUM_BYTES_PER_PAGE;
+    memory->num_bytes_per_page = num_bytes_per_page;
 
     *p_buf = p;
     return true;
@@ -1943,7 +1993,7 @@ load_table_segment_section(const uint8 *buf, const uint8 *buf_end,
 
 #if WASM_ENABLE_MEMORY64 != 0
             if (table_elem_idx_type == VALUE_TYPE_I64
-                && table_segment->base_offset.u.u64 > UINT32_MAX) {
+                && table_segment->base_offset.u.unary.v.u64 > UINT32_MAX) {
                 set_error_buf(error_buf, error_buf_size,
                               "In table64, table base offset can't be "
                               "larger than UINT32_MAX");

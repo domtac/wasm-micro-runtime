@@ -14,7 +14,7 @@ if (NOT DEFINED WASI_SDK_DIR)
     set(WASI_SDK_DIR "/opt/wasi-sdk")
 endif ()
 
-set(CMAKE_C_FLAGS "-nostdlib -pthread -Qunused-arguments")
+set(CMAKE_C_FLAGS "-nostdlib -Qunused-arguments")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -z stack-size=8192 -nostdlib -O0")
 set(CMAKE_C_COMPILER_TARGET "wasm32")
 set(CMAKE_C_COMPILER "${WASI_SDK_DIR}/bin/clang")
@@ -106,4 +106,35 @@ add_custom_command(
 
 add_custom_target(compile_bulk_memory_aot ALL
     DEPENDS ${OUTPUT_AOT}
+)
+
+
+# copy val test
+set(SOURCE_SANDBOX_WASM ${CMAKE_CURRENT_SOURCE_DIR}/additional/test_sandbox.wasm)
+set(BUILD_SANDBOX_WASM ${CMAKE_CURRENT_BINARY_DIR}/../test_sandbox.wasm)
+add_custom_command(
+    OUTPUT ${BUILD_SANDBOX_WASM}
+    COMMAND ${CMAKE_COMMAND} -E copy 
+            ${SOURCE_SANDBOX_WASM}
+            ${BUILD_SANDBOX_WASM}   
+    DEPENDS ${SOURCE_SANDBOX_WASM}
+    COMMENT "Copying test_sandbox.wasm to build directory"
+)
+add_custom_target(copy_test_sandbox ALL
+    DEPENDS ${BUILD_SANDBOX_WASM}
+)
+
+
+set(SOURCE_RUNTIME_WASM ${CMAKE_CURRENT_SOURCE_DIR}/additional/test_runtime.wasm)
+set(BUILD_RUNTIME_WASM ${CMAKE_CURRENT_BINARY_DIR}/../test_runtime.wasm)
+add_custom_command(
+    OUTPUT ${BUILD_RUNTIME_WASM}
+    COMMAND ${CMAKE_COMMAND} -E copy 
+            ${SOURCE_RUNTIME_WASM}
+            ${BUILD_RUNTIME_WASM}   
+    DEPENDS ${SOURCE_RUNTIME_WASM}
+    COMMENT "Copying test_runtime.wasm to build directory"
+)
+add_custom_target(copy_test_runtime ALL
+    DEPENDS ${BUILD_RUNTIME_WASM}
 )

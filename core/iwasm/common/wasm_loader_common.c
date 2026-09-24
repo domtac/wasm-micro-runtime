@@ -19,6 +19,27 @@ wasm_loader_set_error_buf(char *error_buf, uint32 error_buf_size,
     }
 }
 
+uint32
+wasm_calculate_max_page_count(bool is_memory64, uint32 num_bytes_per_page)
+{
+    uint32 custom_pages_multiplier;
+    uint64 result;
+
+    if (num_bytes_per_page == 0) {
+        /* defensive; structurally unreachable post wasm_check_page_size_log2
+         */
+        return UINT32_MAX;
+    }
+
+    custom_pages_multiplier = DEFAULT_NUM_BYTES_PER_PAGE / num_bytes_per_page;
+    result = (uint64)(is_memory64 ? DEFAULT_MEM64_MAX_PAGES : DEFAULT_MAX_PAGES)
+             * (uint64)custom_pages_multiplier;
+    if (result > UINT32_MAX) {
+        result = UINT32_MAX;
+    }
+    return (uint32)result;
+}
+
 #if WASM_ENABLE_MEMORY64 != 0
 bool
 check_memory64_flags_consistency(WASMModule *module, char *error_buf,
@@ -74,9 +95,17 @@ wasm_memory_check_flags(const uint8 mem_flag, char *error_buf,
             return false;
         }
 #endif
+#if WASM_ENABLE_CUSTOM_PAGE_SIZE == 0
+        if (mem_flag & CUSTOM_PAGE_SIZE_FLAG) {
+            wasm_loader_set_error_buf(error_buf, error_buf_size,
+                                      "invalid limits flags", is_aot);
+            return false;
+        }
+#endif
     }
 
-    if (mem_flag > MAX_PAGE_COUNT_FLAG + SHARED_MEMORY_FLAG + MEMORY64_FLAG) {
+    if (mem_flag > MAX_PAGE_COUNT_FLAG + SHARED_MEMORY_FLAG + MEMORY64_FLAG
+                       + CUSTOM_PAGE_SIZE_FLAG) {
         wasm_loader_set_error_buf(error_buf, error_buf_size,
                                   "invalid limits flags", is_aot);
         return false;
@@ -121,6 +150,21 @@ wasm_table_check_flags(const uint8 table_flag, char *error_buf,
 
     return true;
 }
+
+#if WASM_ENABLE_CUSTOM_PAGE_SIZE != 0
+bool
+wasm_check_page_size_log2(uint32 page_size_log2, uint32 *num_bytes_per_page,
+                          char *error_buf, uint32 error_buf_size, bool is_aot)
+{
+    if (!num_bytes_per_page || page_size_log2 > 16) {
+        wasm_loader_set_error_buf(error_buf, error_buf_size,
+                                  "invalid custom page size", is_aot);
+        return false;
+    }
+    *num_bytes_per_page = 1u << page_size_log2;
+    return true;
+}
+#endif /* WASM_ENABLE_CUSTOM_PAGE_SIZE != 0 */
 
 /*
  * compare with a bigger type set in `wasm_value_type_size_internal()`,

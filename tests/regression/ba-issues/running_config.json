@@ -1818,6 +1818,56 @@
                 "stdout content": "Exception: unsupported opcode",
                 "description": "classic-interp will exit gracefully when meeting simd opcodes"
             }
+        },
+        {
+            "deprecated": false,
+            "ids": [
+                980002
+            ],
+            "runtime": "iwasm-default-branch-hints-enabled",
+            "file": "branch_hint_invalid_free.wasm",
+            "mode": "fast-interp",
+            "options": "",
+            "argument": "",
+            "expected return": {
+                "ret code": 255,
+                "stdout content": "WASM module load failed: invalid number of branch hints: expected at most 0, got 2",
+                "description": ""
+            }
+
+        },
+        {
+            "deprecated": false,
+            "ids": [
+                980003
+            ],
+            "runtime": "iwasm-default-branch-hints-enabled",
+            "file": "branch_hint_null_deref.wasm",
+            "mode": "fast-interp",
+            "options": "",
+            "argument": "",
+            "expected return": {
+                "ret code": 255,
+                "stdout content": "WASM module load failed: invalid number of branch hints: expected at most 0, got 42949672",
+                "description": ""
+            }
+
+        },
+        {
+            "deprecated": false,
+            "ids": [
+                4916
+            ],
+            "runtime": "iwasm-default-tail-call-wasi-disabled",
+            "file": "tail_call_stack_overflow.wasm",
+            "mode": "fast-interp",
+            "options": "--stack-size=131072 --heap-size=0 -f test",
+            "argument": "",
+            "expected return": {
+                "ret code": 0,
+                "stdout content": "0x2a:i32",
+                "description": "no heap buffer overflow from return_call when callee has a larger const pool than caller"
+            }
         }
     ]
 }

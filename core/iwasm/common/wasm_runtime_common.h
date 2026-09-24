@@ -529,6 +529,9 @@ typedef struct WASMModuleMemConsumption {
     uint32 table_segs_size;
     uint32 data_segs_size;
     uint32 const_strs_size;
+#if WASM_ENABLE_LOAD_CUSTOM_SECTION != 0
+    uint32 custom_sections_size;
+#endif
 #if WASM_ENABLE_AOT != 0
     uint32 aot_code_size;
 #endif
@@ -1426,6 +1429,9 @@ wasm_runtime_check_and_update_last_used_shared_heap(
     uintptr_t *shared_heap_start_off_p, uintptr_t *shared_heap_end_off_p,
     uint8 **shared_heap_base_addr_adj_p, bool is_memory64);
 #endif
+
+struct WASMModuleInstanceExtraCommon *
+GetModuleInstanceExtraCommon(struct WASMModuleInstance *module_inst);
 
 #ifdef __cplusplus
 }

@@ -77,18 +77,39 @@ typedef float64 CellType_F64;
 #else /* else of !defined(OS_ENABLE_HW_BOUND_CHECK) || \
          WASM_CPU_SUPPORTS_UNALIGNED_ADDR_ACCESS == 0 */
 
-#define CHECK_MEMORY_OVERFLOW(bytes)                      \
-    do {                                                  \
-        uint64 offset1 = (uint64)offset + (uint64)addr;   \
-        CHECK_SHARED_HEAP_OVERFLOW(offset1, bytes, maddr) \
-        maddr = memory->memory_data + offset1;            \
+#define CHECK_MEMORY_OVERFLOW(bytes)                                          \
+    do {                                                                     \
+        uint64 offset1 = (uint64)offset + (uint64)addr;                      \
+        CHECK_SHARED_HEAP_OVERFLOW(offset1, bytes, maddr)                    \
+        /* HW-based bounds checking relies on the OS's page-granularity      \
+         * guard region and cannot enforce byte-precise bounds for a         \
+         * custom page size smaller than the default 64 KiB page -- fall    \
+         * back to an explicit check in that case only (zero added cost     \
+         * for the default page size, which this branch never takes).       \
+         * Kept as an if/else (rather than an early-exit if) so this        \
+         * statement remains the dangling-else body of                      \
+         * CHECK_SHARED_HEAP_OVERFLOW above -- an early-exit form here       \
+         * would let the unconditional maddr assignment run again after     \
+         * CHECK_SHARED_HEAP_OVERFLOW already set maddr for a shared-heap    \
+         * address, clobbering it. */                                       \
+        if (disable_bounds_checks                                            \
+            || memory->num_bytes_per_page >= DEFAULT_NUM_BYTES_PER_PAGE      \
+            || offset1 + bytes <= get_linear_mem_size())                     \
+            maddr = memory->memory_data + offset1;                          \
+        else                                                                 \
+            goto out_of_bounds;                                             \
     } while (0)
 
-#define CHECK_BULK_MEMORY_OVERFLOW(start, bytes, maddr)   \
-    do {                                                  \
-        uint64 offset1 = (uint32)(start);                 \
-        CHECK_SHARED_HEAP_OVERFLOW(offset1, bytes, maddr) \
-        maddr = memory->memory_data + offset1;            \
+#define CHECK_BULK_MEMORY_OVERFLOW(start, bytes, maddr)                      \
+    do {                                                                     \
+        uint64 offset1 = (uint32)(start);                                    \
+        CHECK_SHARED_HEAP_OVERFLOW(offset1, bytes, maddr)                    \
+        if (disable_bounds_checks                                            \
+            || memory->num_bytes_per_page >= DEFAULT_NUM_BYTES_PER_PAGE      \
+            || offset1 + bytes <= get_linear_mem_size())                     \
+            maddr = memory->memory_data + offset1;                          \
+        else                                                                 \
+            goto out_of_bounds;                                             \
     } while (0)
 
 #endif /* end of !defined(OS_ENABLE_HW_BOUND_CHECK) || \
@@ -1613,14 +1634,14 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
     int32_t exception_tag_index;
 #endif
     uint8 value_type;
-#if !defined(OS_ENABLE_HW_BOUND_CHECK) \
-    || WASM_CPU_SUPPORTS_UNALIGNED_ADDR_ACCESS == 0
+    /* Declared unconditionally: the HW-bound-check-enabled custom-page-size
+     * fallback check (see CHECK_MEMORY_OVERFLOW above) also needs to honor
+     * this flag, not only the software-bounds-check build configuration. */
 #if WASM_CONFIGURABLE_BOUNDS_CHECKS != 0
     bool disable_bounds_checks = !wasm_runtime_is_bounds_checks_enabled(
         (WASMModuleInstanceCommon *)module);
 #else
     bool disable_bounds_checks = false;
-#endif
 #endif
 #if WASM_ENABLE_GC != 0
     WASMObjectRef gc_obj;
@@ -1715,11 +1736,24 @@ wasm_interp_call_func_bytecode(WASMModuleInstance *module,
                 exception_tag_index = *((uint32 *)tgtframe_sp);
                 tgtframe_sp++;
 
-                /* get tag type */
-                uint8 tag_type_index =
-                    module->module->tags[exception_tag_index]->type;
-                uint32 cell_num_to_copy =
-                    wasm_types[tag_type_index]->param_cell_num;
+                uint32 cell_num_to_copy = 0;
+
+                if (IS_INVALID_TAGINDEX(exception_tag_index)) {
+                    /*
+                     * Cross-module exception with unknown tag.
+                     * No parameters to copy - just re-throw with
+                     * the invalid tag index so find_a_catch_handler
+                     * routes it to CATCH_ALL.
+                     */
+                    cell_num_to_copy = 0;
+                }
+                else {
+                    /* get tag type */
+                    uint8 tag_type_index =
+                        module->module->tags[exception_tag_index]->type;
+                    cell_num_to_copy =
+                        wasm_types[tag_type_index]->param_cell_num;
+                }
 
                 /* move exception parameters (if there are any) onto top
                  * of stack */

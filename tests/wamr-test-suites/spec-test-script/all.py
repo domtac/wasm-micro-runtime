@@ -80,6 +80,7 @@ def ignore_the_case(
     gc_flag=False,
     memory64_flag=False,
     multi_memory_flag=False,
+    custom_page_sizes_flag=False,
     xip_flag=False,
     eh_flag=False,
     qemu_flag=False,
@@ -175,6 +176,7 @@ def test_case(
     extended_const_flag=False,
     memory64_flag=False,
     multi_memory_flag=False,
+    custom_page_sizes_flag=False,
     qemu_flag=False,
     qemu_firmware="",
     log="",
@@ -238,6 +240,9 @@ def test_case(
 
     if multi_memory_flag:
         CMD.append("--multi-memory")
+
+    if custom_page_sizes_flag:
+        CMD.append("--custom-page-sizes")
 
     if log != "":
         CMD.append("--log-dir")
@@ -311,6 +316,7 @@ def test_suite(
     extended_const_flag=False,
     memory64_flag=False,
     multi_memory_flag=False,
+    custom_page_sizes_flag=False,
     parl_flag=False,
     qemu_flag=False,
     qemu_firmware="",
@@ -339,6 +345,10 @@ def test_suite(
     if multi_memory_flag:
         multi_memory_list = sorted(suite_path.glob("multi-memory/*.wast"))
         case_list.extend(multi_memory_list)
+
+    if custom_page_sizes_flag:
+        custom_page_sizes_list = sorted(suite_path.glob("custom-page-sizes/*.wast"))
+        case_list.extend(custom_page_sizes_list)
 
     # ignore based on command line options
     filtered_case_list = []
@@ -393,6 +403,7 @@ def test_suite(
                         extended_const_flag,
                         memory64_flag,
                         multi_memory_flag,
+                        custom_page_sizes_flag,
                         qemu_flag,
                         qemu_firmware,
                         log,
@@ -437,6 +448,7 @@ def test_suite(
                     extended_const_flag,
                     memory64_flag,
                     multi_memory_flag,
+                    custom_page_sizes_flag,
                     qemu_flag,
                     qemu_firmware,
                     log,
@@ -590,6 +602,13 @@ def main():
         help="Running with multi-memory feature",
     )
     parser.add_argument(
+        "--custom-page-sizes",
+        action="store_true",
+        default=False,
+        dest="custom_page_sizes_flag",
+        help="Running with custom-page-sizes feature",
+    )
+    parser.add_argument(
         "cases",
         metavar="path_to__case",
         type=str,
@@ -636,6 +655,7 @@ def main():
             options.extended_const_flag,
             options.memory64_flag,
             options.multi_memory_flag,
+            options.custom_page_sizes_flag,
             options.parl_flag,
             options.qemu_flag,
             options.qemu_firmware,
@@ -666,6 +686,7 @@ def main():
                     options.extended_const_flag,
                     options.memory64_flag,
                     options.multi_memory_flag,
+                    options.custom_page_sizes_flag,
                     options.qemu_flag,
                     options.qemu_firmware,
                     options.log,

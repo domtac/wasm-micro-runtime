@@ -415,19 +415,39 @@ runtime_exception_handler(EXCEPTION_POINTERS *exce_info)
 }
 #endif /* end of BH_PLATFORM_WINDOWS */
 
+#ifdef BH_PLATFORM_WINDOWS
+static PVOID runtime_exception_handler_handle = NULL;
+static int32 runtime_exception_handler_ref_count = 0;
+static korp_mutex runtime_exception_handler_lock = NULL;
+#endif
+
 static bool
 runtime_signal_init()
 {
 #ifndef BH_PLATFORM_WINDOWS
     return os_thread_signal_init(runtime_signal_handler) == 0 ? true : false;
 #else
-    if (os_thread_signal_init() != 0)
-        return false;
+    os_mutex_lock(&runtime_exception_handler_lock);
 
-    if (!AddVectoredExceptionHandler(1, runtime_exception_handler)) {
-        os_thread_signal_destroy();
+    if (os_thread_signal_init() != 0) {
+        os_mutex_unlock(&runtime_exception_handler_lock);
         return false;
     }
+
+    if (runtime_exception_handler_ref_count == 0) {
+        runtime_exception_handler_handle =
+            AddVectoredExceptionHandler(1, runtime_exception_handler);
+    }
+
+    if (!runtime_exception_handler_handle) {
+        os_thread_signal_destroy();
+        os_mutex_unlock(&runtime_exception_handler_lock);
+        return false;
+    }
+
+    runtime_exception_handler_ref_count++;
+
+    os_mutex_unlock(&runtime_exception_handler_lock);
 #endif
     return true;
 }
@@ -436,7 +456,25 @@ static void
 runtime_signal_destroy()
 {
 #ifdef BH_PLATFORM_WINDOWS
-    RemoveVectoredExceptionHandler(runtime_exception_handler);
+    os_mutex_lock(&runtime_exception_handler_lock);
+
+    if (runtime_exception_handler_ref_count > 0) {
+        runtime_exception_handler_ref_count--;
+    }
+
+    if (runtime_exception_handler_ref_count == 0
+        && runtime_exception_handler_handle) {
+        if (RemoveVectoredExceptionHandler(runtime_exception_handler_handle)) {
+            runtime_exception_handler_handle = NULL;
+        }
+        else {
+            /* Keep the handle so future init/destroy cycles can retry remove.
+             * Clearing it here may leave a live callback registered forever. */
+            runtime_exception_handler_ref_count = 1;
+        }
+    }
+
+    os_mutex_unlock(&runtime_exception_handler_lock);
 #endif
     os_thread_signal_destroy();
 }
@@ -1991,21 +2029,25 @@ wasm_runtime_dump_module_mem_consumption(const WASMModuleCommon *module)
     }
 #endif
 
-    os_printf("WASM module memory consumption, total size: %u\n",
-              mem_conspn.total_size);
-    os_printf("    module struct size: %u\n", mem_conspn.module_struct_size);
-    os_printf("    types size: %u\n", mem_conspn.types_size);
-    os_printf("    imports size: %u\n", mem_conspn.imports_size);
-    os_printf("    funcs size: %u\n", mem_conspn.functions_size);
-    os_printf("    tables size: %u\n", mem_conspn.tables_size);
-    os_printf("    memories size: %u\n", mem_conspn.memories_size);
-    os_printf("    globals size: %u\n", mem_conspn.globals_size);
-    os_printf("    exports size: %u\n", mem_conspn.exports_size);
-    os_printf("    table segs size: %u\n", mem_conspn.table_segs_size);
-    os_printf("    data segs size: %u\n", mem_conspn.data_segs_size);
-    os_printf("    const strings size: %u\n", mem_conspn.const_strs_size);
+    LOG_VERBOSE("WASM module memory consumption, total size: %u",
+                mem_conspn.total_size);
+    LOG_VERBOSE("    module struct size: %u", mem_conspn.module_struct_size);
+    LOG_VERBOSE("    types size: %u", mem_conspn.types_size);
+    LOG_VERBOSE("    imports size: %u", mem_conspn.imports_size);
+    LOG_VERBOSE("    funcs size: %u", mem_conspn.functions_size);
+    LOG_VERBOSE("    tables size: %u", mem_conspn.tables_size);
+    LOG_VERBOSE("    memories size: %u", mem_conspn.memories_size);
+    LOG_VERBOSE("    globals size: %u", mem_conspn.globals_size);
+    LOG_VERBOSE("    exports size: %u", mem_conspn.exports_size);
+    LOG_VERBOSE("    table segs size: %u", mem_conspn.table_segs_size);
+    LOG_VERBOSE("    data segs size: %u", mem_conspn.data_segs_size);
+    LOG_VERBOSE("    const strings size: %u", mem_conspn.const_strs_size);
+#if WASM_ENABLE_LOAD_CUSTOM_SECTION != 0
+    LOG_VERBOSE("    custom sections size: %u",
+                mem_conspn.custom_sections_size);
+#endif
 #if WASM_ENABLE_AOT != 0
-    os_printf("    aot code size: %u\n", mem_conspn.aot_code_size);
+    LOG_VERBOSE("    aot code size: %u", mem_conspn.aot_code_size);
 #endif
 }
 
@@ -2028,16 +2070,16 @@ wasm_runtime_dump_module_inst_mem_consumption(
     }
 #endif
 
-    os_printf("WASM module inst memory consumption, total size: %lu\n",
-              mem_conspn.total_size);
-    os_printf("    module inst struct size: %u\n",
-              mem_conspn.module_inst_struct_size);
-    os_printf("    memories size: %lu\n", mem_conspn.memories_size);
-    os_printf("        app heap size: %u\n", mem_conspn.app_heap_size);
-    os_printf("    tables size: %u\n", mem_conspn.tables_size);
-    os_printf("    functions size: %u\n", mem_conspn.functions_size);
-    os_printf("    globals size: %u\n", mem_conspn.globals_size);
-    os_printf("    exports size: %u\n", mem_conspn.exports_size);
+    LOG_VERBOSE("WASM module inst memory consumption, total size: %lu",
+                mem_conspn.total_size);
+    LOG_VERBOSE("    module inst struct size: %u",
+                mem_conspn.module_inst_struct_size);
+    LOG_VERBOSE("    memories size: %lu", mem_conspn.memories_size);
+    LOG_VERBOSE("        app heap size: %u", mem_conspn.app_heap_size);
+    LOG_VERBOSE("    tables size: %u", mem_conspn.tables_size);
+    LOG_VERBOSE("    functions size: %u", mem_conspn.functions_size);
+    LOG_VERBOSE("    globals size: %u", mem_conspn.globals_size);
+    LOG_VERBOSE("    exports size: %u", mem_conspn.exports_size);
 }
 
 void
@@ -2046,14 +2088,14 @@ wasm_runtime_dump_exec_env_mem_consumption(const WASMExecEnv *exec_env)
     uint32 total_size =
         offsetof(WASMExecEnv, wasm_stack_u.bottom) + exec_env->wasm_stack_size;
 
-    os_printf("Exec env memory consumption, total size: %u\n", total_size);
-    os_printf("    exec env struct size: %u\n",
-              offsetof(WASMExecEnv, wasm_stack_u.bottom));
+    LOG_VERBOSE("Exec env memory consumption, total size: %u", total_size);
+    LOG_VERBOSE("    exec env struct size: %u",
+                offsetof(WASMExecEnv, wasm_stack_u.bottom));
 #if WASM_ENABLE_INTERP != 0 && WASM_ENABLE_FAST_INTERP == 0
-    os_printf("        block addr cache size: %u\n",
-              sizeof(exec_env->block_addr_cache));
+    LOG_VERBOSE("        block addr cache size: %u",
+                sizeof(exec_env->block_addr_cache));
 #endif
-    os_printf("    stack size: %u\n", exec_env->wasm_stack_size);
+    LOG_VERBOSE("    stack size: %u", exec_env->wasm_stack_size);
 }
 
 uint32
@@ -2114,20 +2156,20 @@ wasm_runtime_dump_mem_consumption(WASMExecEnv *exec_env)
                  + exec_env->wasm_stack_size + module_mem_consps.total_size
                  + module_inst_mem_consps.total_size;
 
-    os_printf("\nMemory consumption summary (bytes):\n");
+    LOG_VERBOSE("Memory consumption summary (bytes):");
     wasm_runtime_dump_module_mem_consumption(module_common);
     wasm_runtime_dump_module_inst_mem_consumption(module_inst_common);
     wasm_runtime_dump_exec_env_mem_consumption(exec_env);
-    os_printf("\nTotal memory consumption of module, module inst and "
-              "exec env: %" PRIu64 "\n",
-              total_size);
-    os_printf("Total interpreter stack used: %u\n",
-              exec_env->max_wasm_stack_used);
+    LOG_VERBOSE("Total memory consumption of module, module inst and "
+                "exec env: %" PRIu64,
+                total_size);
+    LOG_VERBOSE("Total interpreter stack used: %u",
+                exec_env->max_wasm_stack_used);
 
     if (max_aux_stack_used != (uint32)-1)
-        os_printf("Total auxiliary stack used: %u\n", max_aux_stack_used);
+        LOG_VERBOSE("Total auxiliary stack used: %u", max_aux_stack_used);
     else
-        os_printf("Total aux stack used: no enough info to profile\n");
+        LOG_VERBOSE("Total aux stack used: no enough info to profile");
 
     /*
      * Report the native stack usage estimation.
@@ -2139,13 +2181,13 @@ wasm_runtime_dump_mem_consumption(WASMExecEnv *exec_env)
      * It doesn't cover host func implementations, signal handlers, etc.
      */
     if (exec_env->native_stack_top_min != (void *)UINTPTR_MAX)
-        os_printf("Native stack left: %zd\n",
-                  exec_env->native_stack_top_min
-                      - exec_env->native_stack_boundary);
+        LOG_VERBOSE("Native stack left: %zd",
+                    exec_env->native_stack_top_min
+                        - exec_env->native_stack_boundary);
     else
-        os_printf("Native stack left: no enough info to profile\n");
+        LOG_VERBOSE("Native stack left: no enough info to profile");
 
-    os_printf("Total app heap used: %u\n", app_heap_peak_size);
+    LOG_VERBOSE("Total app heap used: %u", app_heap_peak_size);
 }
 #endif /* end of (WASM_ENABLE_MEMORY_PROFILING != 0) \
                  || (WASM_ENABLE_MEMORY_TRACING != 0) */
@@ -7974,6 +8016,16 @@ wasm_runtime_get_module_name(wasm_module_t module)
     return "";
 }
 
+#if defined(__GNUC__) || defined(__clang__)
+/* In few places we use addresses of local variables for estimating used stack
+   size. This logic conficts with ASAN, since it uses fake stack for local
+   variables storage.
+*/
+#define NO_SANITIZE_ADDRESS __attribute__((no_sanitize_address))
+#else
+#define NO_SANITIZE_ADDRESS
+#endif
+
 /*
  * wasm_runtime_detect_native_stack_overflow
  *
@@ -7983,6 +8035,7 @@ wasm_runtime_get_module_name(wasm_module_t module)
  *
  * - update native_stack_top_min.
  */
+NO_SANITIZE_ADDRESS
 bool
 wasm_runtime_detect_native_stack_overflow(WASMExecEnv *exec_env)
 {
@@ -8005,6 +8058,7 @@ wasm_runtime_detect_native_stack_overflow(WASMExecEnv *exec_env)
     return true;
 }
 
+NO_SANITIZE_ADDRESS
 bool
 wasm_runtime_detect_native_stack_overflow_size(WASMExecEnv *exec_env,
                                                uint32 requested_size)
@@ -8098,3 +8152,18 @@ wasm_runtime_check_and_update_last_used_shared_heap(
     return false;
 }
 #endif
+
+WASMModuleInstanceExtraCommon *
+GetModuleInstanceExtraCommon(WASMModuleInstance *module_inst)
+{
+#if WASM_ENABLE_AOT != 0
+    if (module_inst->module_type == Wasm_Module_AoT) {
+        return &((AOTModuleInstanceExtra *)module_inst->e)->common;
+    }
+    else {
+        return &module_inst->e->common;
+    }
+#else
+    return &module_inst->e->common;
+#endif
+}

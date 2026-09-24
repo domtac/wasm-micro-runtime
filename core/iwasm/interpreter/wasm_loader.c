@@ -4,7 +4,7 @@
  */
 
 #include "wasm_loader.h"
-#include "bh_platform.h"
+#include "bh_log.h"
 #include "wasm.h"
 #include "wasm_opcode.h"
 #include "wasm_runtime.h"
@@ -1920,6 +1920,11 @@ resolve_struct_type(const uint8 **p_buf, const uint8 *buf_end,
         if (need_ref_type_map)
             ref_type_map_count++;
 
+        if (wasm_is_reftype_anyref(ref_type.ref_type)) {
+            LOG_ERROR("Not support using anyref in struct fields");
+            return false;
+        }
+
         if (wasm_is_type_reftype(ref_type.ref_type))
             ref_field_count++;
 
@@ -2036,6 +2041,11 @@ resolve_array_type(const uint8 **p_buf, const uint8 *buf_end,
 
     if (!resolve_value_type(&p, p_end, module, type_count, &need_ref_type_map,
                             &ref_type, true, error_buf, error_buf_size)) {
+        return false;
+    }
+
+    if (wasm_is_reftype_anyref(ref_type.ref_type)) {
+        LOG_ERROR("Not support using anyref in array element type");
         return false;
     }
 
@@ -2975,11 +2985,12 @@ fail:
 }
 
 static bool
-check_memory_init_size(bool is_memory64, uint32 init_size, char *error_buf,
+check_memory_init_size(bool is_memory64, uint32 init_size,
+                       uint32 num_bytes_per_page, char *error_buf,
                        uint32 error_buf_size)
 {
     uint32 default_max_size =
-        is_memory64 ? DEFAULT_MEM64_MAX_PAGES : DEFAULT_MAX_PAGES;
+        wasm_calculate_max_page_count(is_memory64, num_bytes_per_page);
 
     if (!is_memory64 && init_size > default_max_size) {
         set_error_buf(error_buf, error_buf_size,
@@ -2998,11 +3009,12 @@ check_memory_init_size(bool is_memory64, uint32 init_size, char *error_buf,
 }
 
 static bool
-check_memory_max_size(bool is_memory64, uint32 init_size, uint32 max_size,
+check_memory_max_size(bool is_memory64, uint32 init_size,
+                      uint32 num_bytes_per_page, uint32 max_size,
                       char *error_buf, uint32 error_buf_size)
 {
     uint32 default_max_size =
-        is_memory64 ? DEFAULT_MEM64_MAX_PAGES : DEFAULT_MAX_PAGES;
+        wasm_calculate_max_page_count(is_memory64, num_bytes_per_page);
 
     if (max_size < init_size) {
         set_error_buf(error_buf, error_buf_size,
@@ -3045,6 +3057,10 @@ load_memory_import(const uint8 **p_buf, const uint8 *buf_end,
     bool is_memory64 = false;
     uint32 declare_init_page_count = 0;
     uint32 declare_max_page_count = 0;
+#if WASM_ENABLE_CUSTOM_PAGE_SIZE != 0
+    bool is_custom_page_size = false;
+#endif
+    uint32 num_bytes_per_page = DEFAULT_NUM_BYTES_PER_PAGE;
 #if WASM_ENABLE_MULTI_MODULE != 0
     WASMModule *sub_module = NULL;
     WASMMemory *linked_memory = NULL;
@@ -3059,24 +3075,47 @@ load_memory_import(const uint8 **p_buf, const uint8 *buf_end,
         return false;
     }
 
+    if (mem_flag & CUSTOM_PAGE_SIZE_FLAG) {
+#if WASM_ENABLE_CUSTOM_PAGE_SIZE != 0
+        is_custom_page_size = true;
+#endif
+    }
+
     if (!wasm_memory_check_flags(mem_flag, error_buf, error_buf_size, false)) {
         return false;
     }
 
     read_leb_uint32(p, p_end, declare_init_page_count);
-    if (!check_memory_init_size(is_memory64, declare_init_page_count, error_buf,
+
+    if (mem_flag & MAX_PAGE_COUNT_FLAG) {
+        read_leb_uint32(p, p_end, declare_max_page_count);
+    }
+
+#if WASM_ENABLE_CUSTOM_PAGE_SIZE != 0
+    if (is_custom_page_size) {
+        uint32 page_size_log2 = 0;
+        read_leb_uint32(p, p_end, page_size_log2);
+        if (!wasm_check_page_size_log2(page_size_log2, &num_bytes_per_page,
+                                       error_buf, error_buf_size, false)) {
+            return false;
+        }
+    }
+#endif
+
+    if (!check_memory_init_size(is_memory64, declare_init_page_count,
+                                num_bytes_per_page, error_buf,
                                 error_buf_size)) {
         return false;
     }
 
 #if WASM_ENABLE_APP_FRAMEWORK == 0
-    max_page_count = is_memory64 ? DEFAULT_MEM64_MAX_PAGES : DEFAULT_MAX_PAGES;
+    max_page_count =
+        wasm_calculate_max_page_count(is_memory64, num_bytes_per_page);
 #endif
     if (mem_flag & MAX_PAGE_COUNT_FLAG) {
-        read_leb_uint32(p, p_end, declare_max_page_count);
         if (!check_memory_max_size(is_memory64, declare_init_page_count,
-                                   declare_max_page_count, error_buf,
-                                   error_buf_size)) {
+                                   num_bytes_per_page, declare_max_page_count,
+                                   error_buf, error_buf_size)) {
             return false;
         }
         if (declare_max_page_count > max_page_count) {
@@ -3159,7 +3198,7 @@ load_memory_import(const uint8 **p_buf, const uint8 *buf_end,
     memory->mem_type.flags = mem_flag;
     memory->mem_type.init_page_count = declare_init_page_count;
     memory->mem_type.max_page_count = declare_max_page_count;
-    memory->mem_type.num_bytes_per_page = DEFAULT_NUM_BYTES_PER_PAGE;
+    memory->mem_type.num_bytes_per_page = num_bytes_per_page;
 
     *p_buf = p;
 
@@ -3465,6 +3504,10 @@ load_memory(const uint8 **p_buf, const uint8 *buf_end, WASMMemory *memory,
     uint32 max_page_count;
 #endif
     bool is_memory64 = false;
+    uint32 num_bytes_per_page = DEFAULT_NUM_BYTES_PER_PAGE;
+#if WASM_ENABLE_CUSTOM_PAGE_SIZE != 0
+    bool is_custom_page_size = false;
+#endif
 
     p_org = p;
     read_leb_uint32(p, p_end, memory->flags);
@@ -3475,24 +3518,46 @@ load_memory(const uint8 **p_buf, const uint8 *buf_end, WASMMemory *memory,
         return false;
     }
 
+    if (memory->flags & CUSTOM_PAGE_SIZE_FLAG) {
+#if WASM_ENABLE_CUSTOM_PAGE_SIZE != 0
+        is_custom_page_size = true;
+#endif
+    }
+
     if (!wasm_memory_check_flags(memory->flags, error_buf, error_buf_size,
                                  false)) {
         return false;
     }
 
     read_leb_uint32(p, p_end, memory->init_page_count);
-    if (!check_memory_init_size(is_memory64, memory->init_page_count, error_buf,
-                                error_buf_size))
+
+    if (memory->flags & 1) {
+        read_leb_uint32(p, p_end, memory->max_page_count);
+    }
+
+#if WASM_ENABLE_CUSTOM_PAGE_SIZE != 0
+    if (is_custom_page_size) {
+        uint32 page_size_log2 = 0;
+        read_leb_uint32(p, p_end, page_size_log2);
+        if (!wasm_check_page_size_log2(page_size_log2, &num_bytes_per_page,
+                                       error_buf, error_buf_size, false)) {
+            return false;
+        }
+    }
+#endif
+
+    if (!check_memory_init_size(is_memory64, memory->init_page_count,
+                                num_bytes_per_page, error_buf, error_buf_size))
         return false;
 
 #if WASM_ENABLE_APP_FRAMEWORK == 0
-    max_page_count = is_memory64 ? DEFAULT_MEM64_MAX_PAGES : DEFAULT_MAX_PAGES;
+    max_page_count =
+        wasm_calculate_max_page_count(is_memory64, num_bytes_per_page);
 #endif
     if (memory->flags & 1) {
-        read_leb_uint32(p, p_end, memory->max_page_count);
         if (!check_memory_max_size(is_memory64, memory->init_page_count,
-                                   memory->max_page_count, error_buf,
-                                   error_buf_size))
+                                   num_bytes_per_page, memory->max_page_count,
+                                   error_buf, error_buf_size))
             return false;
         if (memory->max_page_count > max_page_count)
             memory->max_page_count = max_page_count;
@@ -3502,7 +3567,7 @@ load_memory(const uint8 **p_buf, const uint8 *buf_end, WASMMemory *memory,
         memory->max_page_count = max_page_count;
     }
 
-    memory->num_bytes_per_page = DEFAULT_NUM_BYTES_PER_PAGE;
+    memory->num_bytes_per_page = num_bytes_per_page;
 
     *p_buf = p;
     return true;
@@ -5567,6 +5632,27 @@ fail:
 #endif
 
 #if WASM_ENABLE_BRANCH_HINTS != 0
+/**
+ * Count the number of branch instructions for the specified function.
+ */
+static uint32
+calculate_num_branch_instructions(const WASMFunction *func)
+{
+    const uint8 *code = func->code;
+    const uint8 *code_end = code + func->code_size;
+    uint32 max_hints = 0;
+
+    while (code < code_end) {
+        uint8 opcode = *code++;
+
+        if (opcode == WASM_OP_IF || opcode == WASM_OP_BR_IF) {
+            max_hints++;
+        }
+    }
+
+    return max_hints;
+}
+
 static bool
 handle_branch_hint_section(const uint8 *buf, const uint8 *buf_end,
                            WASMModule *module, char *error_buf,
@@ -5601,14 +5687,42 @@ handle_branch_hint_section(const uint8 *buf, const uint8 *buf_end,
 
         uint32 num_hints;
         read_leb_uint32(buf, buf_end, num_hints);
+
+        /* Ensure that num_hints doesn't exceed the actual number of branch
+         * instructions */
+        WASMFunction *func =
+            module->functions[func_idx - module->import_function_count];
+        uint32 max_branch_instructions =
+            calculate_num_branch_instructions(func);
+        if (num_hints > max_branch_instructions) {
+            set_error_buf_v(
+                error_buf, error_buf_size,
+                "invalid number of branch hints: expected at most %u, got %u",
+                max_branch_instructions, num_hints);
+            goto fail;
+        }
+
         struct WASMCompilationHintBranchHint *new_hints = loader_malloc(
             sizeof(struct WASMCompilationHintBranchHint) * num_hints, error_buf,
             error_buf_size);
+        if (!new_hints) {
+            goto fail;
+        }
         for (uint32 j = 0; j < num_hints; ++j) {
             struct WASMCompilationHintBranchHint *new_hint = &new_hints[j];
             new_hint->next = NULL;
             new_hint->type = WASM_COMPILATION_BRANCH_HINT;
             read_leb_uint32(buf, buf_end, new_hint->offset);
+
+            /* Validate offset is within the function's code bounds */
+            if (new_hint->offset >= func->code_size) {
+                set_error_buf_v(
+                    error_buf, error_buf_size,
+                    "invalid branch hint offset: %u exceeds function "
+                    "code size %u",
+                    new_hint->offset, func->code_size);
+                goto fail;
+            }
 
             uint32 size;
             read_leb_uint32(buf, buf_end, size);
@@ -5616,7 +5730,9 @@ handle_branch_hint_section(const uint8 *buf, const uint8 *buf_end,
                 set_error_buf_v(error_buf, error_buf_size,
                                 "invalid branch hint size, expected 1, got %d.",
                                 size);
-                wasm_runtime_free(new_hint);
+                /* Do not free new_hints here - any hints already linked into
+                 * the module structure will be freed during module cleanup.
+                 * Freeing here would cause a double-free. */
                 goto fail;
             }
 
@@ -5629,7 +5745,9 @@ handle_branch_hint_section(const uint8 *buf, const uint8 *buf_end,
                 set_error_buf_v(error_buf, error_buf_size,
                                 "invalid branch hint, expected 0 or 1, got %d",
                                 data);
-                wasm_runtime_free(new_hint);
+                /* Do not free new_hints here - any hints already linked into
+                 * the module structure will be freed during module cleanup.
+                 * Freeing here would cause a double-free. */
                 goto fail;
             }
 
@@ -5710,7 +5828,7 @@ load_user_section(const uint8 *buf, const uint8 *buf_end, WASMModule *module,
 #else
     if (name_len == 25
         && memcmp((const char *)p, "metadata.code.branch_hint", 25) == 0) {
-        LOG_VERBOSE("Found branch hint section, but branch hints are disabled "
+        LOG_WARNING("Found branch hint section, but branch hints are disabled "
                     "in this build, skipping.");
     }
 #endif
@@ -6684,9 +6802,11 @@ load_from_sections(WASMModule *module, WASMSection *sections,
         if (module->import_memory_count) {
             WASMMemoryImport *memory_import =
                 &module->import_memories[0].u.memory;
+            uint32 max_pages = wasm_calculate_max_page_count(
+                false, memory_import->mem_type.num_bytes_per_page);
             /* Only resize the memory to one big page if num_bytes_per_page is
              * in valid range of uint32 */
-            if (memory_import->mem_type.init_page_count < DEFAULT_MAX_PAGES) {
+            if (memory_import->mem_type.init_page_count < max_pages) {
                 memory_import->mem_type.num_bytes_per_page *=
                     memory_import->mem_type.init_page_count;
 
@@ -6700,9 +6820,12 @@ load_from_sections(WASMModule *module, WASMSection *sections,
         }
         if (module->memory_count) {
             WASMMemory *memory = &module->memories[0];
+            uint32 max_pages = wasm_calculate_max_page_count(
+                false, memory->num_bytes_per_page);
+
             /* Only resize(shrunk) the memory size if num_bytes_per_page is in
              * valid range of uint32 */
-            if (memory->init_page_count < DEFAULT_MAX_PAGES) {
+            if (memory->init_page_count < max_pages) {
                 memory->num_bytes_per_page *= memory->init_page_count;
                 if (memory->init_page_count > 0)
                     memory->init_page_count = memory->max_page_count = 1;

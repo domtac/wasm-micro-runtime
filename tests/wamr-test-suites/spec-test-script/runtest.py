@@ -345,6 +345,10 @@ parser.add_argument('--memory64', default=False, action='store_true',
 parser.add_argument('--multi-memory', default=False, action='store_true',
         help='Test with multi-memory(with multi-module auto enabled)')
 
+parser.add_argument('--custom-page-sizes', default=False, action='store_true',
+        dest='custom_page_sizes',
+        help='Test with custom-page-sizes')
+
 parser.add_argument('--qemu', default=False, action='store_true',
         help="Enable QEMU")
 
@@ -1115,6 +1119,14 @@ def compile_wast_to_wasm(form, wast_tempfile, wasm_tempfile, opts):
         cmd = [opts.wast2wasm, "--enable-memory64", "--no-check", wast_tempfile, "-o", wasm_tempfile ]
     elif opts.multi_memory:
         cmd = [opts.wast2wasm, "--enable-multi-memory", "--no-check", wast_tempfile, "-o", wasm_tempfile ]
+    elif opts.custom_page_sizes:
+        # `--enable-multi-memory` is required because the upstream
+        # custom-page-sizes.wast test file exercises memory.copy between two
+        # named memories of different page sizes; without it wat2wasm
+        # rejects the named-memory operand syntax before custom page sizes
+        # can even be exercised.
+        cmd = [opts.wast2wasm, "--enable-custom-page-sizes", "--enable-multi-memory",
+               "--no-check", wast_tempfile, "-o", wasm_tempfile ]
     elif opts.extended_const:
         cmd = [opts.wast2wasm, "--enable-extended-const", "--no-check", wast_tempfile, "-o", wasm_tempfile ]
     else:

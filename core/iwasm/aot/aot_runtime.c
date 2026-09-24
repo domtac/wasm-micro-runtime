@@ -9,6 +9,7 @@
 #include "mem_alloc.h"
 #include "../common/wasm_runtime_common.h"
 #include "../common/wasm_memory.h"
+#include "../common/wasm_loader_common.h"
 #include "../interpreter/wasm_runtime.h"
 #if WASM_ENABLE_SHARED_MEMORY != 0
 #include "../common/wasm_shared_memory.h"
@@ -980,8 +981,8 @@ memory_instantiate(AOTModuleInstance *module_inst, AOTModuleInstance *parent,
     uint32 init_page_count = memory->init_page_count;
     uint32 max_page_count = wasm_runtime_get_max_mem(
         max_memory_pages, memory->init_page_count, memory->max_page_count);
-    uint32 default_max_pages;
     uint32 inc_page_count, global_idx;
+    uint32 default_max_pages;
     uint32 bytes_of_last_page, bytes_to_page_end;
     uint64 aux_heap_base,
         heap_offset = (uint64)num_bytes_per_page * init_page_count;
@@ -1003,15 +1004,8 @@ memory_instantiate(AOTModuleInstance *module_inst, AOTModuleInstance *parent,
     }
 #endif
 
-#if WASM_ENABLE_MEMORY64 != 0
-    if (is_memory64) {
-        default_max_pages = DEFAULT_MEM64_MAX_PAGES;
-    }
-    else
-#endif
-    {
-        default_max_pages = DEFAULT_MAX_PAGES;
-    }
+    default_max_pages =
+        wasm_calculate_max_page_count(is_memory64, num_bytes_per_page);
 
     if (heap_size > 0 && module->malloc_func_index != (uint32)-1
         && module->free_func_index != (uint32)-1) {
@@ -1099,8 +1093,6 @@ memory_instantiate(AOTModuleInstance *module_inst, AOTModuleInstance *parent,
                           "try using `--heap-size=0` option");
             return NULL;
         }
-        if (max_page_count > default_max_pages)
-            max_page_count = default_max_pages;
     }
 
     LOG_VERBOSE("Memory instantiate:");
@@ -1963,6 +1955,12 @@ aot_instantiate(AOTModule *module, AOTModuleInstance *parent,
     module_inst->e =
         (WASMModuleInstanceExtra *)((uint8 *)module_inst + extra_info_offset);
     extra = (AOTModuleInstanceExtra *)module_inst->e;
+#if WASM_ENABLE_THREAD_MGR != 0
+    if (os_mutex_init(&extra->common.exception_lock) != 0) {
+        wasm_runtime_free(module_inst);
+        return NULL;
+    }
+#endif
 
 #if WASM_ENABLE_GC != 0
     /* Initialize gc heap first since it may be used when initializing
@@ -2352,6 +2350,10 @@ aot_deinstantiate(AOTModuleInstance *module_inst, bool is_sub_inst)
            of current module instance after it is deinstantiated. */
         wasm_exec_env_destroy((WASMExecEnv *)module_inst->exec_env_singleton);
     }
+
+#if WASM_ENABLE_THREAD_MGR != 0
+    os_mutex_destroy(&extra->common.exception_lock);
+#endif
 
 #if WASM_ENABLE_PERF_PROFILING != 0
     if (module_inst->func_perf_profilings)
@@ -3257,6 +3259,12 @@ aot_invoke_native(WASMExecEnv *exec_env, uint32 func_idx, uint32 argc,
     bool ret = false;
     bh_assert(func_idx < aot_module->import_func_count);
 
+#if defined(__has_feature)
+#if __has_feature(memory_sanitizer)
+#include <sanitizer/msan_interface.h>
+    __msan_unpoison(argv, (sizeof(uint32) * argc));
+#endif
+#endif
     import_func = aot_module->import_funcs + func_idx;
     if (import_func->call_conv_wasm_c_api)
         func_ptr =
@@ -3765,6 +3773,17 @@ aot_get_module_mem_consumption(const AOTModule *module,
         mem_conspn->aot_code_size += sizeof(uint8) * obj_data->size;
     }
 
+#if WASM_ENABLE_LOAD_CUSTOM_SECTION != 0
+    {
+        WASMCustomSection *section = module->custom_section_list;
+        while (section) {
+            mem_conspn->custom_sections_size +=
+                sizeof(WASMCustomSection) + section->content_len;
+            section = section->next;
+        }
+    }
+#endif
+
     mem_conspn->total_size += mem_conspn->module_struct_size;
     mem_conspn->total_size += mem_conspn->types_size;
     mem_conspn->total_size += mem_conspn->imports_size;
@@ -3777,6 +3796,9 @@ aot_get_module_mem_consumption(const AOTModule *module,
     mem_conspn->total_size += mem_conspn->data_segs_size;
     mem_conspn->total_size += mem_conspn->const_strs_size;
     mem_conspn->total_size += mem_conspn->aot_code_size;
+#if WASM_ENABLE_LOAD_CUSTOM_SECTION != 0
+    mem_conspn->total_size += mem_conspn->custom_sections_size;
+#endif
 }
 
 void
@@ -4176,7 +4198,8 @@ aot_alloc_tiny_frame(WASMExecEnv *exec_env, uint32 func_index)
 {
     AOTTinyFrame *new_frame = (AOTTinyFrame *)exec_env->wasm_stack.top;
 
-    if ((uint8 *)new_frame > exec_env->wasm_stack.top_boundary) {
+    if ((uint8 *)new_frame + sizeof(AOTTinyFrame)
+        > exec_env->wasm_stack.top_boundary) {
         aot_set_exception((WASMModuleInstance *)exec_env->module_inst,
                           "wasm operand stack overflow");
         return false;
@@ -4332,6 +4355,7 @@ aot_copy_callstack_tiny_frame(WASMExecEnv *exec_env, WASMCApiFrame *buffer,
 
     AOTTinyFrame *frame = (AOTTinyFrame *)(top - sizeof(AOTTinyFrame));
     WASMCApiFrame record_frame;
+    memset(&record_frame, 0, sizeof(WASMCApiFrame));
     while (frame && (uint8_t *)frame >= bottom && count < (skip_n + length)) {
         if (count < skip_n) {
             ++count;
@@ -4374,6 +4398,7 @@ aot_copy_callstack_standard_frame(WASMExecEnv *exec_env, WASMCApiFrame *buffer,
     uint32 frame_size = (uint32)offsetof(AOTFrame, lp);
 
     WASMCApiFrame record_frame;
+    memset(&record_frame, 0, sizeof(WASMCApiFrame));
     while (cur_frame && (uint8_t *)cur_frame >= bottom
            && (uint8_t *)cur_frame + frame_size <= top_boundary
            && count < (skip_n + length)) {

@@ -76,11 +76,11 @@ gc_init_with_pool(char *buf, gc_size_t buf_size)
     heap_max_size = (uint32)(buf_end - base_addr) & (uint32)~7;
 
 #if WASM_ENABLE_MEMORY_TRACING != 0
-    os_printf("Heap created, total size: %u\n", buf_size);
-    os_printf("   heap struct size: %u\n", sizeof(gc_heap_t));
-    os_printf("   actual heap size: %u\n", heap_max_size);
-    os_printf("   padding bytes: %u\n",
-              buf_size - sizeof(gc_heap_t) - heap_max_size);
+    LOG_VERBOSE("Heap created, total size: %u", buf_size);
+    LOG_VERBOSE("   heap struct size: %u", sizeof(gc_heap_t));
+    LOG_VERBOSE("   actual heap size: %u", heap_max_size);
+    LOG_VERBOSE("   padding bytes: %u",
+                buf_size - sizeof(gc_heap_t) - heap_max_size);
 #endif
     return gc_init_internal(heap, base_addr, heap_max_size);
 }
@@ -119,11 +119,11 @@ gc_init_with_struct_and_pool(char *struct_buf, gc_size_t struct_buf_size,
     heap_max_size = (uint32)(pool_buf_end - base_addr) & (uint32)~7;
 
 #if WASM_ENABLE_MEMORY_TRACING != 0
-    os_printf("Heap created, total size: %u\n",
-              struct_buf_size + pool_buf_size);
-    os_printf("   heap struct size: %u\n", sizeof(gc_heap_t));
-    os_printf("   actual heap size: %u\n", heap_max_size);
-    os_printf("   padding bytes: %u\n", pool_buf_size - heap_max_size);
+    LOG_VERBOSE("Heap created, total size: %u",
+                struct_buf_size + pool_buf_size);
+    LOG_VERBOSE("   heap struct size: %u", sizeof(gc_heap_t));
+    LOG_VERBOSE("   actual heap size: %u", heap_max_size);
+    LOG_VERBOSE("   padding bytes: %u", pool_buf_size - heap_max_size);
 #endif
     return gc_init_internal(heap, base_addr, heap_max_size);
 }
@@ -286,13 +286,13 @@ gc_migrate(gc_handle_t handle, char *pool_buf_new, gc_size_t pool_buf_size)
     while (cur < end) {
         size = hmu_get_size(cur);
 
-#if BH_ENABLE_GC_CORRUPTION_CHECK != 0
         if (size <= 0 || size > (uint32)((uint8 *)end - (uint8 *)cur)) {
             LOG_ERROR("[GC_ERROR]Heap is corrupted, heap migrate failed.\n");
+#if BH_ENABLE_GC_CORRUPTION_CHECK != 0
             heap->is_heap_corrupted = true;
+#endif
             return GC_ERROR;
         }
-#endif
 
         if (hmu_get_ut(cur) == HMU_FC && !HMU_IS_FC_NORMAL(size)) {
             tree_node = (hmu_tree_node_t *)cur;
@@ -315,15 +315,13 @@ gc_migrate(gc_handle_t handle, char *pool_buf_new, gc_size_t pool_buf_size)
         cur = (hmu_t *)((char *)cur + size);
     }
 
-#if BH_ENABLE_GC_CORRUPTION_CHECK != 0
     if (cur != end) {
         LOG_ERROR("[GC_ERROR]Heap is corrupted, heap migrate failed.\n");
+#if BH_ENABLE_GC_CORRUPTION_CHECK != 0
         heap->is_heap_corrupted = true;
+#endif
         return GC_ERROR;
     }
-#else
-    bh_assert(cur == end);
-#endif
 
     return 0;
 }

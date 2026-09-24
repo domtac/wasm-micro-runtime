@@ -84,7 +84,7 @@
 #endif
 
 #define AOT_MAGIC_NUMBER 0x746f6100
-#define AOT_CURRENT_VERSION 5
+#define AOT_CURRENT_VERSION 6
 
 #ifndef WASM_ENABLE_JIT
 #define WASM_ENABLE_JIT 0
@@ -695,6 +695,11 @@ unless used elsewhere */
 /* Disable multi-memory by default */
 #ifndef WASM_ENABLE_MULTI_MEMORY
 #define WASM_ENABLE_MULTI_MEMORY 0
+#endif
+
+/* Enable custom page size by default */
+#ifndef WASM_ENABLE_CUSTOM_PAGE_SIZE
+#define WASM_ENABLE_CUSTOM_PAGE_SIZE 1
 #endif
 
 #ifndef WASM_TABLE_MAX_SIZE

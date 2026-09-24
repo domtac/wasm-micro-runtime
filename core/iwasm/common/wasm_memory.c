@@ -241,6 +241,11 @@ wasm_runtime_create_shared_heap(SharedHeapInitArgs *init_args)
     }
 
     size = align_uint(size, os_getpagesize());
+    if (size != init_args->size) {
+        LOG_WARNING("Shared heap size aligned from %u to %u", init_args->size,
+                    size);
+    }
+
     if (size > APP_HEAP_SIZE_MAX || size < APP_HEAP_SIZE_MIN) {
         LOG_WARNING("Invalid size of shared heap");
         goto fail2;
@@ -1025,6 +1030,24 @@ wasm_runtime_free_internal(void *ptr)
     }
 }
 
+static inline void *
+wasm_runtime_aligned_alloc_internal(unsigned int size, unsigned int alignment)
+{
+    if (memory_mode == MEMORY_MODE_UNKNOWN) {
+        LOG_ERROR("wasm_runtime_aligned_alloc failed: memory hasn't been "
+                  "initialized.\n");
+        return NULL;
+    }
+
+    if (memory_mode != MEMORY_MODE_POOL) {
+        LOG_ERROR("wasm_runtime_aligned_alloc failed: only supported in POOL "
+                  "memory mode.\n");
+        return NULL;
+    }
+
+    return mem_allocator_malloc_aligned(pool_allocator, size, alignment);
+}
+
 void *
 wasm_runtime_malloc(unsigned int size)
 {
@@ -1045,6 +1068,35 @@ wasm_runtime_malloc(unsigned int size)
 #endif
 
     return wasm_runtime_malloc_internal(size);
+}
+
+void *
+wasm_runtime_aligned_alloc(unsigned int size, unsigned int alignment)
+{
+    if (alignment == 0) {
+        LOG_WARNING(
+            "warning: wasm_runtime_aligned_alloc with zero alignment\n");
+        return NULL;
+    }
+
+    if (size == 0) {
+        LOG_WARNING("warning: wasm_runtime_aligned_alloc with size zero\n");
+        /* Allocate at least alignment bytes (smallest multiple of alignment) */
+        size = alignment;
+#if BH_ENABLE_GC_VERIFY != 0
+        exit(-1);
+#endif
+    }
+
+#if WASM_ENABLE_FUZZ_TEST != 0
+    if (size >= WASM_MEM_ALLOC_MAX_SIZE) {
+        LOG_WARNING(
+            "warning: wasm_runtime_aligned_alloc with too large size\n");
+        return NULL;
+    }
+#endif
+
+    return wasm_runtime_aligned_alloc_internal(size, alignment);
 }
 
 void *
@@ -1542,6 +1594,12 @@ static void
 wasm_munmap_linear_memory(void *mapped_mem, uint64 commit_size, uint64 map_size)
 {
 #ifdef BH_PLATFORM_WINDOWS
+    /* commit_size passed in here is the caller's logical/unaligned
+     * memory_data_size, but the actual OS commit performed by
+     * wasm_allocate_linear_memory (see the commit_size local there) is
+     * rounded up to the host page size -- decommit the same rounded-up
+     * size, or a fractional page can be left committed/leaked. */
+    commit_size = align_as_and_cast(commit_size, os_getpagesize());
     os_mem_decommit(mapped_mem, commit_size);
 #else
     (void)commit_size;
@@ -1700,25 +1758,57 @@ wasm_enlarge_memory_internal(WASMModuleInstanceCommon *module,
     memory->memory_data = memory_data_new;
 #else
     if (full_size_mmaped) {
+        /*
+         * The initial commit (wasm_allocate_linear_memory) rounds the
+         * committed/protected region up to the host's OS page size,
+         * since os_mprotect/os_mem_commit require page-aligned addresses
+         * and lengths -- this is unrelated to the wasm-visible logical
+         * size (memory->memory_data_size / total_size_old here, which
+         * remains the exact, unaligned num_bytes_per_page * page_count
+         * after the first grow, and IS the aligned value at the point of
+         * first instantiation only). For the default 65536-byte page
+         * size this alignment is always a no-op (65536 is already a
+         * multiple of any real OS page size), but for a custom page size
+         * smaller than the host's page granularity, `total_size_new`
+         * (raw, unaligned) can be smaller than the ALREADY-aligned
+         * `total_size_old`, e.g. growing a 256-byte-page memory from 1
+         * to 3 pages: old (aligned at instantiation) = 4096, new (raw)
+         * = 768. Subtracting raw new - old aligned would underflow as
+         * an unsigned 64-bit value, producing a huge garbage length that
+         * os_mprotect would reject. Align BOTH boundaries the same way
+         * before comparing/subtracting, and skip the OS call entirely
+         * when the new aligned boundary doesn't exceed the old one --
+         * the region is already protected from a prior (larger, aligned)
+         * commit and no further OS-level change is needed.
+         */
+        uint64 os_page_size = os_getpagesize();
+        uint64 total_size_old_aligned =
+            align_as_and_cast(total_size_old, os_page_size);
+        uint64 total_size_new_aligned =
+            align_as_and_cast(total_size_new, os_page_size);
+
+        if (total_size_new_aligned > total_size_old_aligned) {
+            uint64 grow_bytes =
+                total_size_new_aligned - total_size_old_aligned;
+            uint8 *grow_addr = memory_data_old + total_size_old_aligned;
+
 #ifdef BH_PLATFORM_WINDOWS
-        if (!os_mem_commit(memory->memory_data_end,
-                           total_size_new - total_size_old,
-                           MMAP_PROT_READ | MMAP_PROT_WRITE)) {
-            ret = false;
-            goto return_func;
-        }
+            if (!os_mem_commit(grow_addr, grow_bytes,
+                               MMAP_PROT_READ | MMAP_PROT_WRITE)) {
+                ret = false;
+                goto return_func;
+            }
 #endif
 
-        if (os_mprotect(memory->memory_data_end,
-                        total_size_new - total_size_old,
-                        MMAP_PROT_READ | MMAP_PROT_WRITE)
-            != 0) {
+            if (os_mprotect(grow_addr, grow_bytes,
+                            MMAP_PROT_READ | MMAP_PROT_WRITE)
+                != 0) {
 #ifdef BH_PLATFORM_WINDOWS
-            os_mem_decommit(memory->memory_data_end,
-                            total_size_new - total_size_old);
+                os_mem_decommit(grow_addr, grow_bytes);
 #endif
-            ret = false;
-            goto return_func;
+                ret = false;
+                goto return_func;
+            }
         }
     }
     else {
@@ -1730,11 +1820,41 @@ wasm_enlarge_memory_internal(WASMModuleInstanceCommon *module,
             }
         }
 
-        if (!(memory_data_new =
-                  wasm_mremap_linear_memory(memory_data_old, total_size_old,
-                                            total_size_new, total_size_new))) {
-            ret = false;
-            goto return_func;
+        /*
+         * Same rationale as the full_size_mmaped branch above:
+         * total_size_old is the memory's page-aligned allocation size
+         * from wasm_allocate_linear_memory (aligned to the host's OS
+         * page size unconditionally, regardless of full_size_mmaped),
+         * while total_size_new (num_bytes_per_page * total_page_count)
+         * is the raw, unaligned logical size. For a custom page size
+         * smaller than the host's page granularity, raw new can be
+         * smaller than aligned old (e.g. growing a 256-byte-page memory
+         * from 1 to 3 pages: old aligned = 4096, new raw = 768), which
+         * would otherwise violate wasm_mremap_linear_memory's
+         * new_size > old_size precondition. Align both boundaries the
+         * same way before calling into it, and skip the OS-level
+         * remap/protect entirely when the new aligned boundary doesn't
+         * exceed the old one -- the region is already large enough from
+         * the prior (larger, aligned) allocation.
+         */
+        {
+            uint64 os_page_size = os_getpagesize();
+            uint64 total_size_old_aligned =
+                align_as_and_cast(total_size_old, os_page_size);
+            uint64 total_size_new_aligned =
+                align_as_and_cast(total_size_new, os_page_size);
+
+            if (total_size_new_aligned > total_size_old_aligned) {
+                if (!(memory_data_new = wasm_mremap_linear_memory(
+                          memory_data_old, total_size_old_aligned,
+                          total_size_new_aligned, total_size_new_aligned))) {
+                    ret = false;
+                    goto return_func;
+                }
+            }
+            else {
+                memory_data_new = memory_data_old;
+            }
         }
 
         if (heap_size > 0) {
@@ -2010,7 +2130,7 @@ wasm_allocate_linear_memory(uint8 **data, bool is_shared_memory,
                             uint64 init_page_count, uint64 max_page_count,
                             uint64 *memory_data_size)
 {
-    uint64 map_size, page_size;
+    uint64 map_size, page_size, commit_size;
 
     bh_assert(data);
     bh_assert(memory_data_size);
@@ -2039,7 +2159,10 @@ wasm_allocate_linear_memory(uint8 **data, bool is_shared_memory,
     *memory_data_size = init_page_count * num_bytes_per_page;
 
     bh_assert(*memory_data_size <= GET_MAX_LINEAR_MEMORY_SIZE(is_memory64));
-    *memory_data_size = align_as_and_cast(*memory_data_size, page_size);
+    /* commit_size is the OS-page-aligned size used only for the actual
+     * mmap/allocation commit; *memory_data_size must remain the exact,
+     * unaligned wasm-visible logical size used for bounds checks. */
+    commit_size = align_as_and_cast(*memory_data_size, page_size);
 
     if (map_size > 0) {
 #if WASM_MEM_ALLOC_WITH_USAGE != 0
@@ -2048,11 +2171,11 @@ wasm_allocate_linear_memory(uint8 **data, bool is_shared_memory,
 #if WASM_MEM_ALLOC_WITH_USER_DATA != 0
                                   allocator_user_data,
 #endif
-                                  *memory_data_size))) {
+                                  commit_size))) {
             return BHT_ERROR;
         }
 #else
-        if (!(*data = wasm_mmap_linear_memory(map_size, *memory_data_size))) {
+        if (!(*data = wasm_mmap_linear_memory(map_size, commit_size))) {
             return BHT_ERROR;
         }
 #endif
