@@ -1594,6 +1594,12 @@ static void
 wasm_munmap_linear_memory(void *mapped_mem, uint64 commit_size, uint64 map_size)
 {
 #ifdef BH_PLATFORM_WINDOWS
+    /* commit_size passed in here is the caller's logical/unaligned
+     * memory_data_size, but the actual OS commit performed by
+     * wasm_allocate_linear_memory (see the commit_size local there) is
+     * rounded up to the host page size -- decommit the same rounded-up
+     * size, or a fractional page can be left committed/leaked. */
+    commit_size = align_as_and_cast(commit_size, os_getpagesize());
     os_mem_decommit(mapped_mem, commit_size);
 #else
     (void)commit_size;
@@ -2124,7 +2130,7 @@ wasm_allocate_linear_memory(uint8 **data, bool is_shared_memory,
                             uint64 init_page_count, uint64 max_page_count,
                             uint64 *memory_data_size)
 {
-    uint64 map_size, page_size;
+    uint64 map_size, page_size, commit_size;
 
     bh_assert(data);
     bh_assert(memory_data_size);
@@ -2153,7 +2159,10 @@ wasm_allocate_linear_memory(uint8 **data, bool is_shared_memory,
     *memory_data_size = init_page_count * num_bytes_per_page;
 
     bh_assert(*memory_data_size <= GET_MAX_LINEAR_MEMORY_SIZE(is_memory64));
-    *memory_data_size = align_as_and_cast(*memory_data_size, page_size);
+    /* commit_size is the OS-page-aligned size used only for the actual
+     * mmap/allocation commit; *memory_data_size must remain the exact,
+     * unaligned wasm-visible logical size used for bounds checks. */
+    commit_size = align_as_and_cast(*memory_data_size, page_size);
 
     if (map_size > 0) {
 #if WASM_MEM_ALLOC_WITH_USAGE != 0
@@ -2162,11 +2171,11 @@ wasm_allocate_linear_memory(uint8 **data, bool is_shared_memory,
 #if WASM_MEM_ALLOC_WITH_USER_DATA != 0
                                   allocator_user_data,
 #endif
-                                  *memory_data_size))) {
+                                  commit_size))) {
             return BHT_ERROR;
         }
 #else
-        if (!(*data = wasm_mmap_linear_memory(map_size, *memory_data_size))) {
+        if (!(*data = wasm_mmap_linear_memory(map_size, commit_size))) {
             return BHT_ERROR;
         }
 #endif
