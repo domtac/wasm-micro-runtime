@@ -35,12 +35,15 @@ cp -a custom_section ${OUT_DIR}
 
 printf '\n##################### build wasm app\n'
 cd ${WASM_APPS}
+# Custom page size (16KB vs default 64KB) reduces linear-memory heap
+# footprint; requires a WAMR runtime built with WAMR_BUILD_CUSTOM_PAGE_SIZE=1.
 /opt/wasi-sdk/bin/clang \
     --target=wasm32 \
     -O0 \
     -nostdlib \
     -Wl,--strip-all,--no-entry \
     -Wl,--allow-undefined \
+    -Wl,--page-size=16384 \
     -Wl,--export=run_demo \
     -o ${OUT_DIR}/wasm-apps/custom_section.wasm \
     custom_section.c \

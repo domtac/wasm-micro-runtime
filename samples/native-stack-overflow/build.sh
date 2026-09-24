@@ -58,9 +58,12 @@ APP_SRC="$i"
 OUT_FILE=${i%.*}.wasm
 
 # use WAMR SDK to build out the .wasm binary
+# Custom page size (16KB vs default 64KB) reduces linear-memory heap
+# footprint; requires a WAMR runtime built with WAMR_BUILD_CUSTOM_PAGE_SIZE=1.
 /opt/wasi-sdk/bin/clang     \
         -mexec-model=reactor \
         -Os -z stack-size=4096 -Wl,--initial-memory=65536 \
+        -Wl,--page-size=16384 \
         -Wl,--allow-undefined \
         -o ${OUT_DIR}/wasm-apps/${OUT_FILE} ${APP_SRC}
 
