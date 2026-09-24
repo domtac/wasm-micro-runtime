@@ -12,6 +12,9 @@ set (WAMR_BUILD_APP_FRAMEWORK 0)
 set (WAMR_BUILD_MEMORY_PROFILING 1)
 set (WAMR_BUILD_INTERP 1)
 set (WAMR_BUILD_AOT 0)
+if (APPLE)
+  set (WAMR_BUILD_INVOKE_NATIVE_GENERAL 1)
+endif ()
 
 include (../unit_common.cmake)
 

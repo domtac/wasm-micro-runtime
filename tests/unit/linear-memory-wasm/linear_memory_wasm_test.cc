@@ -6,6 +6,8 @@
 #include "test_helper.h"
 #include "gtest/gtest.h"
 
+#include <vector>
+
 #include "bh_read_file.h"
 #include "wasm_runtime_common.h"
 
@@ -111,6 +113,183 @@ destroy_module_env(struct ret_env module_env)
     if (module_env.wasm_file_buf) {
         wasm_runtime_free(module_env.wasm_file_buf);
     }
+}
+
+namespace {
+
+/* Wire-format flag bits for the custom-page-sizes proposal. */
+constexpr uint8_t kMaxPageCountFlag = 0x01;
+constexpr uint8_t kCustomPageSizeFlag = 0x08;
+
+void
+append_leb_u32(std::vector<uint8_t> &buf, uint32_t value)
+{
+    do {
+        uint8_t byte = value & 0x7f;
+        value >>= 7;
+        if (value != 0)
+            byte |= 0x80;
+        buf.push_back(byte);
+    } while (value != 0);
+}
+
+void
+append_header(std::vector<uint8_t> &buf)
+{
+    /* magic: \0asm */
+    buf.push_back(0x00);
+    buf.push_back(0x61);
+    buf.push_back(0x73);
+    buf.push_back(0x6d);
+    /* version: 1 */
+    buf.push_back(0x01);
+    buf.push_back(0x00);
+    buf.push_back(0x00);
+    buf.push_back(0x00);
+}
+
+void
+append_section(std::vector<uint8_t> &buf, uint8_t section_id,
+               const std::vector<uint8_t> &content)
+{
+    buf.push_back(section_id);
+    append_leb_u32(buf, (uint32_t)content.size());
+    buf.insert(buf.end(), content.begin(), content.end());
+}
+
+/*
+ * Hand-builds a module with:
+ *  - one memory: flags=(CUSTOM_PAGE_SIZE_FLAG|MAX_PAGE_COUNT_FLAG)=0x09,
+ *    init=1, max=10, page_size_log2=8 (256 bytes/page)
+ *  - one exported function () -> i32 named "grow_and_size" whose body is:
+ *    i32.const 2; memory.grow 0; drop; memory.size 0; end
+ * (grows memory by 2 pages then returns the new page count).
+ *
+ * wabt/wat2wasm has no support for the custom-page-sizes proposal's
+ * memory-limits encoding, so this module is hand-constructed byte-by-byte,
+ * matching the technique used by the loader-level tests.
+ */
+std::vector<uint8_t>
+build_custom_page_size_grow_and_size_module()
+{
+    std::vector<uint8_t> module;
+    append_header(module);
+
+    /* type section: one func type () -> (i32) */
+    std::vector<uint8_t> type_section;
+    append_leb_u32(type_section, 1); /* type count */
+    type_section.push_back(0x60);   /* func */
+    type_section.push_back(0x00);   /* param count */
+    type_section.push_back(0x01);   /* result count */
+    type_section.push_back(0x7f);   /* i32 */
+    append_section(module, /* SECTION_TYPE_TYPE */ 1, type_section);
+
+    /* function section: one function, type index 0 */
+    std::vector<uint8_t> function_section;
+    append_leb_u32(function_section, 1);
+    append_leb_u32(function_section, 0);
+    append_section(module, /* SECTION_TYPE_FUNC */ 3, function_section);
+
+    /* memory section: flags=0x09, init=1, max=10, page_size_log2=8 */
+    std::vector<uint8_t> mem_section;
+    append_leb_u32(mem_section, 1); /* memory count */
+    uint8_t mem_flags = kCustomPageSizeFlag | kMaxPageCountFlag;
+    mem_section.push_back(mem_flags);
+    append_leb_u32(mem_section, 1);  /* init */
+    append_leb_u32(mem_section, 10); /* max */
+    append_leb_u32(mem_section, 8);  /* page_size_log2 */
+    append_section(module, /* SECTION_TYPE_MEMORY */ 5, mem_section);
+
+    /* export section: export function 0 as "grow_and_size" */
+    std::vector<uint8_t> export_section;
+    append_leb_u32(export_section, 1); /* export count */
+    const char *export_name = "grow_and_size";
+    append_leb_u32(export_section, (uint32_t)strlen(export_name));
+    export_section.insert(export_section.end(), export_name,
+                          export_name + strlen(export_name));
+    export_section.push_back(/* EXPORT_KIND_FUNC */ 0);
+    append_leb_u32(export_section, 0); /* function index 0 */
+    append_section(module, /* SECTION_TYPE_EXPORT */ 7, export_section);
+
+    /* code section: body = i32.const 2; memory.grow 0; drop;
+     * memory.size 0; end */
+    std::vector<uint8_t> code_section;
+    append_leb_u32(code_section, 1); /* function body count */
+    std::vector<uint8_t> body;
+    body.push_back(0x00); /* local decl count */
+    body.push_back(0x41); /* i32.const */
+    body.push_back(0x02); /* 2 */
+    body.push_back(0x40); /* memory.grow */
+    body.push_back(0x00); /* memidx */
+    body.push_back(0x1a); /* drop */
+    body.push_back(0x3f); /* memory.size */
+    body.push_back(0x00); /* memidx */
+    body.push_back(0x0b); /* end */
+    append_leb_u32(code_section, (uint32_t)body.size());
+    code_section.insert(code_section.end(), body.begin(), body.end());
+    append_section(module, /* SECTION_TYPE_CODE */ 10, code_section);
+
+    return module;
+}
+
+} // namespace
+
+TEST_F(TEST_SUITE_NAME, test_custom_page_size_memory_grow_and_size_execution)
+{
+    auto module_bytes = build_custom_page_size_grow_and_size_module();
+
+    char error_buf[128] = { 0 };
+    wasm_module_t wasm_module = wasm_runtime_load(
+        module_bytes.data(), (uint32_t)module_bytes.size(), error_buf,
+        sizeof(error_buf));
+    ASSERT_NE(nullptr, wasm_module) << error_buf;
+
+    /* heap_size=0: WAMR's pre-existing app-heap-insertion logic (unrelated
+     * to custom page sizes) sizes extra pages to fit a requested heap
+     * using the memory's OWN page size -- a 16KB heap request against a
+     * 256-byte page would consume ~64 pages just for the heap, before
+     * this test's own memory.grow(2) even runs, defeating the discriminating
+     * proof below. Zero heap keeps this test isolated to grow/size only. */
+    wasm_module_inst_t wasm_module_inst = wasm_runtime_instantiate(
+        wasm_module, 16 * 1024, /* heap_size */ 0, error_buf,
+        sizeof(error_buf));
+    ASSERT_NE(nullptr, wasm_module_inst) << error_buf;
+
+    wasm_exec_env_t exec_env =
+        wasm_runtime_create_exec_env(wasm_module_inst, 16 * 1024);
+    ASSERT_NE(nullptr, exec_env);
+
+    WASMFunctionInstanceCommon *func =
+        wasm_runtime_lookup_function(wasm_module_inst, "grow_and_size");
+    ASSERT_NE(nullptr, func);
+
+    uint32 argv[1] = { 0 };
+    bool ret = wasm_runtime_call_wasm(exec_env, func, 0, argv);
+    ASSERT_TRUE(ret) << wasm_runtime_get_exception(wasm_module_inst);
+
+    /* grow_and_size grows by 2 pages (1 -> 3) and returns memory.size */
+    EXPECT_EQ(3u, argv[0]);
+
+    /* Public accessor consistency: post-grow page count is 3,
+     * bytes-per-page is 256. */
+    wasm_memory_inst_t memory_inst =
+        wasm_runtime_get_memory(wasm_module_inst, 0);
+    ASSERT_NE(nullptr, memory_inst);
+    EXPECT_EQ(3u, wasm_memory_get_cur_page_count(memory_inst));
+    EXPECT_EQ(256u, wasm_memory_get_bytes_per_page(memory_inst));
+
+    /* Discriminating bounds-check proof: at 256 bytes/page, 3 pages = 768
+     * bytes total. A byte offset just past the true (small) allocated
+     * size must be rejected -- which would NOT be the case if the
+     * runtime silently still assumed 64 KiB pages internally. */
+    EXPECT_TRUE(
+        wasm_runtime_validate_app_addr(wasm_module_inst, 0, 768));
+    EXPECT_FALSE(
+        wasm_runtime_validate_app_addr(wasm_module_inst, 0, 769));
+
+    wasm_runtime_destroy_exec_env(exec_env);
+    wasm_runtime_deinstantiate(wasm_module_inst);
+    wasm_runtime_unload(wasm_module);
 }
 
 TEST_F(TEST_SUITE_NAME, test_wasm_mem_page_count)
