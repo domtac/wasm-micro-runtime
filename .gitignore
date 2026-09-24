@@ -30,6 +30,7 @@ product-mini/platforms/linux-sgx/enclave-sample/
 
 build_out
 tests/wamr-test-suites/workspace
+tests/unit/runtime-common/wasm-apps/main.aot
 
 !/test-tools/wamr-ide/VSCode-Extension/.vscode
 
@@ -46,3 +47,11 @@ samples/workload/include/**
 
 tests/unit/runtime-common/wasm-apps/main.aot
 tests/unit/aot-stack-frame/wasm-apps/test_aot.h
+
+# Local agent/tooling scaffolding and planning notes -- not part of this PR.
+/.agents/
+/.claude/
+/.opencode/
+/_bmad/
+/_bmad-output/
+/.bmad-loop/
