@@ -93,6 +93,7 @@ extern "C" {
 #define MAX_PAGE_COUNT_FLAG 0x01
 #define SHARED_MEMORY_FLAG 0x02
 #define MEMORY64_FLAG 0x04
+#define CUSTOM_PAGE_SIZE_FLAG 0x08
 #define MAX_TABLE_SIZE_FLAG 0x01
 /* the shared flag for table is not actual used now */
 #define SHARED_TABLE_FLAG 0x02
@@ -107,6 +108,7 @@ extern "C" {
 #define OPT_MEMIDX_FLAG 0x40
 
 #define DEFAULT_NUM_BYTES_PER_PAGE 65536
+#define CUSTOM_NUM_BYTES_PER_PAGE 1
 #define DEFAULT_MAX_PAGES 65536
 #define DEFAULT_MEM64_MAX_PAGES UINT32_MAX
 
