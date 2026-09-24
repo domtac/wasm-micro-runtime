@@ -9,6 +9,7 @@
 #include "mem_alloc.h"
 #include "../common/wasm_runtime_common.h"
 #include "../common/wasm_memory.h"
+#include "../common/wasm_loader_common.h"
 #include "../interpreter/wasm_runtime.h"
 #if WASM_ENABLE_SHARED_MEMORY != 0
 #include "../common/wasm_shared_memory.h"
@@ -980,8 +981,8 @@ memory_instantiate(AOTModuleInstance *module_inst, AOTModuleInstance *parent,
     uint32 init_page_count = memory->init_page_count;
     uint32 max_page_count = wasm_runtime_get_max_mem(
         max_memory_pages, memory->init_page_count, memory->max_page_count);
-    uint32 default_max_pages;
     uint32 inc_page_count, global_idx;
+    uint32 default_max_pages;
     uint32 bytes_of_last_page, bytes_to_page_end;
     uint64 aux_heap_base,
         heap_offset = (uint64)num_bytes_per_page * init_page_count;
@@ -1003,18 +1004,8 @@ memory_instantiate(AOTModuleInstance *module_inst, AOTModuleInstance *parent,
     }
 #endif
 
-    uint32 custom_pages_multiplier =
-        DEFAULT_NUM_BYTES_PER_PAGE / num_bytes_per_page;
-
-#if WASM_ENABLE_MEMORY64 != 0
-    if (is_memory64) {
-        default_max_pages = DEFAULT_MEM64_MAX_PAGES * custom_pages_multiplier;
-    }
-    else
-#endif
-    {
-        default_max_pages = DEFAULT_MAX_PAGES * custom_pages_multiplier;
-    }
+    default_max_pages =
+        wasm_calculate_max_page_count(is_memory64, num_bytes_per_page);
 
     if (heap_size > 0 && module->malloc_func_index != (uint32)-1
         && module->free_func_index != (uint32)-1) {
@@ -1102,8 +1093,6 @@ memory_instantiate(AOTModuleInstance *module_inst, AOTModuleInstance *parent,
                           "try using `--heap-size=0` option");
             return NULL;
         }
-        if (max_page_count > default_max_pages)
-            max_page_count = default_max_pages;
     }
 
     LOG_VERBOSE("Memory instantiate:");

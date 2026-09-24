@@ -115,6 +115,64 @@ build_imported_memory_module(uint8_t mem_flags, uint32_t init_page_count,
     return module;
 }
 
+/* Same as build_declared_memory_module, but with a type/function/code
+ * section containing a `memory.size` opcode -- required so that
+ * module->possible_memory_grow is set, which prevents an unrelated
+ * pre-existing "shrink to single big page" loader optimization from
+ * collapsing max_page_count down to 1 regardless of the declared value,
+ * masking assertions about the actual parsed max_page_count (mirrors the
+ * same workaround already used in the full-loader's parity test file). */
+std::vector<uint8_t>
+build_declared_memory_module_with_memory_size_op(
+    uint8_t mem_flags, uint32_t init_page_count, uint32_t max_page_count,
+    uint32_t page_size_log2)
+{
+    std::vector<uint8_t> module;
+    append_header(module);
+
+    /* type section: one func type () -> () */
+    std::vector<uint8_t> type_section;
+    append_leb_u32(type_section, 1);
+    type_section.push_back(0x60);
+    type_section.push_back(0x00);
+    type_section.push_back(0x00);
+    append_section(module, /* SECTION_TYPE_TYPE */ 1, type_section);
+
+    /* function section: one function, type index 0 */
+    std::vector<uint8_t> function_section;
+    append_leb_u32(function_section, 1);
+    append_leb_u32(function_section, 0);
+    append_section(module, /* SECTION_TYPE_FUNC */ 3, function_section);
+
+    std::vector<uint8_t> mem_section;
+    append_leb_u32(mem_section, 1); /* memory count */
+    mem_section.push_back(mem_flags);
+    append_leb_u32(mem_section, init_page_count);
+    if (mem_flags & kMaxPageCountFlag) {
+        append_leb_u32(mem_section, max_page_count);
+    }
+    if (mem_flags & kCustomPageSizeFlag) {
+        append_leb_u32(mem_section, page_size_log2);
+    }
+    append_section(module, SECTION_TYPE_MEMORY, mem_section);
+
+    /* code section: one body = memory.size(0x3f) memidx(0x00) drop(0x1a)
+     * end(0x0b), with 0 local decls */
+    std::vector<uint8_t> code_section;
+    append_leb_u32(code_section, 1); /* function body count */
+    std::vector<uint8_t> body;
+    body.push_back(0x00); /* local decl count */
+    body.push_back(0x3f); /* memory.size */
+    body.push_back(0x00); /* memidx */
+    body.push_back(0x1a); /* drop */
+    body.push_back(0x0b); /* end */
+    append_leb_u32(code_section, (uint32_t)body.size());
+    code_section.insert(code_section.end(), body.begin(), body.end());
+    append_section(module, /* SECTION_TYPE_CODE */ 10, code_section);
+
+    return module;
+}
+
 class WasmRuntimeEnvironment : public ::testing::Environment {
 public:
     void
@@ -242,8 +300,8 @@ TEST(wasm_mini_loader_custom_page_size, truncated_buffer_during_page_size_decode
      * never appended, so the section body ends exactly where
      * load_memory()'s read_leb_uint32(p, p_end, page_size_log2) would
      * read -- p == p_end, triggering the macro's internal `goto fail`
-     * instead of an out-of-bounds read. Mirrors Story 1.2's equivalent
-     * wasm_loader.c coverage (Verification Gap review parity check). */
+     * instead of an out-of-bounds read. Mirrors the full loader's
+     * equivalent wasm_loader.c coverage. */
     std::vector<uint8_t> module;
     append_header(module);
 
@@ -269,4 +327,38 @@ TEST(wasm_mini_loader_custom_page_size, truncated_buffer_during_page_size_decode
     if (loaded_module) {
         wasm_loader_unload(loaded_module);
     }
+}
+
+TEST(wasm_mini_loader_custom_page_size,
+    max_page_count_scaled_for_custom_page_size)
+{
+    /* page_size_log2 = 8 -> 256 bytes/page.
+     * Correct scaled cap: DEFAULT_MAX_PAGES(65536) * (65536/256) = 16,777,216.
+     * Stale (pre-fix, mini loader had NO scaling at all) cap: DEFAULT_MAX_PAGES
+     * (65536), i.e. entirely unscaled. Choosing a declared value strictly
+     * between these two caps means the test FAILS if the mini loader's
+     * scaling regresses back to none/wrong, and PASSES only when it
+     * correctly matches the full loader's scaling (mini-loader parity
+     * requirement). */
+    uint32_t page_size_log2 = 8;
+    uint32_t declared_max_page_count = 100000;
+
+    auto module_bytes = build_declared_memory_module_with_memory_size_op(
+        kCustomPageSizeFlag | kMaxPageCountFlag, 1, declared_max_page_count,
+        page_size_log2);
+
+    char error_buf[128] = { 0 };
+    LoadArgs args = {};
+    WASMModule *module =
+        wasm_loader_load(module_bytes.data(), (uint32_t)module_bytes.size(),
+#if WASM_ENABLE_MULTI_MODULE != 0
+                         true,
+#endif
+                         &args, error_buf, sizeof(error_buf));
+    ASSERT_NE(module, nullptr) << error_buf;
+    ASSERT_EQ(module->memory_count, 1u);
+    EXPECT_EQ(module->memories[0].num_bytes_per_page, 256u);
+    EXPECT_EQ(module->memories[0].max_page_count, declared_max_page_count);
+
+    wasm_loader_unload(module);
 }
