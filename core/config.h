@@ -697,6 +697,11 @@ unless used elsewhere */
 #define WASM_ENABLE_MULTI_MEMORY 0
 #endif
 
+/* Enable custom page size by default */
+#ifndef WASM_ENABLE_CUSTOM_PAGE_SIZE
+#define WASM_ENABLE_CUSTOM_PAGE_SIZE 1
+#endif
+
 #ifndef WASM_TABLE_MAX_SIZE
 #define WASM_TABLE_MAX_SIZE 1024
 #endif

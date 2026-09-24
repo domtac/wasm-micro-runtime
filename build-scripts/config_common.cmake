@@ -255,6 +255,10 @@ if (NOT DEFINED WAMR_BUILD_MULTI_MEMORY)
   set (WAMR_BUILD_MULTI_MEMORY 0)
 endif ()
 
+if (NOT DEFINED WAMR_BUILD_CUSTOM_PAGE_SIZE)
+  set (WAMR_BUILD_CUSTOM_PAGE_SIZE 1)
+endif ()
+
 if (NOT DEFINED WAMR_BUILD_SHARED_MEMORY)
   set(WAMR_BUILD_SHARED_MEMORY 0)
 endif ()
@@ -433,6 +437,9 @@ endif ()
 if (WAMR_BUILD_MULTI_MEMORY EQUAL 1)
   add_definitions (-DWASM_ENABLE_MULTI_MEMORY=1)
   set (WAMR_BUILD_DEBUG_INTERP 0)
+endif ()
+if (WAMR_BUILD_CUSTOM_PAGE_SIZE EQUAL 0)
+  add_definitions (-DWASM_ENABLE_CUSTOM_PAGE_SIZE=0)
 endif ()
 if (WAMR_BUILD_MINI_LOADER EQUAL 1)
   add_definitions (-DWASM_ENABLE_MINI_LOADER=1)
@@ -807,6 +814,7 @@ message (
 "       \"Legacy Exception Handling\" via WAMR_BUILD_EXCE_HANDLING: ${WAMR_BUILD_EXCE_HANDLING}\n"
 "       \"Memory64\" via WAMR_BUILD_MEMORY64: ${WAMR_BUILD_MEMORY64}\n"
 "       \"Multiple Memories\" via WAMR_BUILD_MULTI_MEMORY: ${WAMR_BUILD_MULTI_MEMORY}\n"
+"       \"Custom Page Size\" via WAMR_BUILD_CUSTOM_PAGE_SIZE: ${WAMR_BUILD_CUSTOM_PAGE_SIZE}\n"
 "       \"Reference Types\" via WAMR_BUILD_REF_TYPES: ${WAMR_BUILD_REF_TYPES}\n"
 "       \"Reference-Typed Strings\" via WAMR_BUILD_STRINGREF: ${WAMR_BUILD_STRINGREF}\n"
 "       \"Tail Call\" via WAMR_BUILD_TAIL_CALL: ${WAMR_BUILD_TAIL_CALL}\n"
